@@ -75,6 +75,18 @@ def test_info_nested_group_indent(tmp_path, capsys) -> None:  # noqa: ANN001
     assert "    child (IMAGE)" in out
 
 
+def test_export_save_error(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
+    src = tmp_path / "n.aseprite"
+    dst = tmp_path / "n.png"
+    rgba_sprite().save(src)
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("PIL.Image.Image.save", fail)
+    assert main(["export", str(src), str(dst)]) == 1
+
+
 def test_export_import_error(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: ANN001
     src = tmp_path / "n.aseprite"
     dst = tmp_path / "n.png"

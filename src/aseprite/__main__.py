@@ -51,10 +51,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         image = sprite.image(args.frame)
-    except (AsepriteError, ImportError, IndexError, ValueError) as exc:
+        image.save(args.output)
+    except (AsepriteError, ImportError, IndexError, OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    image.save(args.output)
     return 0
 
 
