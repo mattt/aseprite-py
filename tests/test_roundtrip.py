@@ -1,5 +1,7 @@
 from uuid import UUID
 
+import pytest
+
 from aseprite import (
     BlendMode,
     CelExtra,
@@ -9,6 +11,8 @@ from aseprite import (
     ColorProfileType,
     ExternalFile,
     ExternalFileType,
+    Grid,
+    HeaderFlags,
     LayerType,
     LoopDirection,
     Mask,
@@ -22,10 +26,14 @@ from aseprite import (
     Sprite,
     Tilemap,
     Tileset,
+    UnknownChunk,
     UserData,
     UserProperty,
 )
-from tests.helpers import rgba_sprite
+from aseprite._binary import Writer
+from aseprite._model import TILESET_FLAG_EMBEDDED, TILESET_FLAG_EXTERNAL
+from aseprite._reader import CHUNK_OLD_PALETTE_11, CHUNK_PATH
+from tests.helpers import _chunk, _document, chunk_types, rgba_sprite
 
 
 def test_construct_open_save_equals(tmp_path) -> None:  # noqa: ANN001
@@ -204,13 +212,24 @@ def test_user_data_property_types() -> None:
             PropertyType.PROPERTIES,
             [UserProperty("n", PropertyType.STRING, "x")],
         ),
+        UserProperty("fl", PropertyType.FLOAT, 1.5),
+        UserProperty("db", PropertyType.DOUBLE, 2.25),
+        UserProperty(
+            "mix",
+            PropertyType.VECTOR,
+            (0, [(PropertyType.INT32, 1), (PropertyType.STRING, "a")]),
+        ),
         UserProperty("id", PropertyType.UUID, UUID(int=1)),
+        UserProperty("idb", PropertyType.UUID, UUID(int=2).bytes),
     ]
     sprite = rgba_sprite()
     sprite.layers[0].user_data = UserData(
         text="note",
         color=Color(1, 2, 3, 4),
-        properties=[PropertiesMap(0, props)],
+        properties=[
+            PropertiesMap(0, props),
+            PropertiesMap(7, [UserProperty("e", PropertyType.STRING, "ext")]),
+        ],
     )
     loaded = Sprite.from_bytes(sprite.to_bytes())
     data = loaded.layers[0].user_data
@@ -224,7 +243,17 @@ def test_user_data_property_types() -> None:
     vec = values["vec"]
     assert isinstance(vec, tuple)
     assert vec[1] == [1, 2, 3]
+    assert values["fl"] == pytest.approx(1.5)
+    assert values["db"] == pytest.approx(2.25)
+    mix = values["mix"]
+    assert isinstance(mix, tuple)
+    assert mix[0] == 0
+    assert mix[1][0] == (PropertyType.INT32, 1)
+    assert mix[1][1] == (PropertyType.STRING, "a")
     assert values["id"] == UUID(int=1)
+    assert values["idb"] == UUID(int=2)
+    assert data.properties[1].key == 7
+    assert data.properties[1].properties[0].value == "ext"
 
 
 def test_mask_and_external_file() -> None:
@@ -258,3 +287,205 @@ def test_layer_flags_and_blend() -> None:
     assert loaded.layers[0].opacity == 128
     assert loaded.layers[0].visible is False
     assert loaded.layers[0].background is True
+    layer.editable = False
+    layer.lock_movement = True
+    layer.prefer_linked_cels = True
+    layer.collapsed = True
+    layer.reference = True
+    layer.uuid = UUID(int=42)
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    again = loaded.layers[0]
+    assert again.editable is False
+    assert again.lock_movement is True
+    assert again.prefer_linked_cels is True
+    assert again.collapsed is True
+    assert again.reference is True
+    assert again.uuid == UUID(int=42)
+    assert loaded.flags & HeaderFlags.LAYER_UUID
+
+
+def test_user_data_attachment_points() -> None:
+    sprite = rgba_sprite()
+    sprite.user_data = UserData(text="sprite")
+    sprite.add_tag("idle", 0, 0)
+    sprite.tags[0].user_data = UserData(text="tag")
+    cel = sprite.frames[0].cel(0)
+    assert cel is not None
+    cel.user_data = UserData(text="cel")
+    sprite.slices.append(
+        Slice(
+            name="box",
+            keys=[SliceKey(0, 0, 0, 2, 2)],
+            user_data=UserData(text="slice"),
+        )
+    )
+    sprite.tilesets.append(
+        Tileset(
+            id=0,
+            name="t",
+            tile_count=1,
+            tile_width=2,
+            tile_height=2,
+            flags=TILESET_FLAG_EMBEDDED,
+            pixels=Pixels(2, 2, b"\x00" * 16, ColorMode.RGBA),
+            user_data=UserData(text="tileset"),
+            tile_user_data=[UserData(text="tile")],
+        )
+    )
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    assert loaded.user_data is not None and loaded.user_data.text == "sprite"
+    assert (
+        loaded.tags[0].user_data is not None and loaded.tags[0].user_data.text == "tag"
+    )
+    loaded_cel = loaded.frames[0].cel(0)
+    assert loaded_cel is not None and loaded_cel.user_data is not None
+    assert loaded_cel.user_data.text == "cel"
+    assert loaded.slices[0].user_data is not None
+    assert loaded.slices[0].user_data.text == "slice"
+    assert loaded.tilesets[0].user_data is not None
+    assert loaded.tilesets[0].user_data.text == "tileset"
+    assert loaded.tilesets[0].tile_user_data[0] is not None
+    assert loaded.tilesets[0].tile_user_data[0].text == "tile"
+
+
+def test_tag_color_and_ping_pong() -> None:
+    sprite = rgba_sprite()
+    sprite.add_tag("pp", 0, 0, direction=LoopDirection.PING_PONG)
+    sprite.tags[0].color = (9, 8, 7)
+    sprite.add_tag("ppr", 0, 0, direction=LoopDirection.PING_PONG_REVERSE)
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    assert loaded.tags["pp"].direction is LoopDirection.PING_PONG
+    assert loaded.tags["pp"].color == (9, 8, 7)
+    assert loaded.tags["ppr"].direction is LoopDirection.PING_PONG_REVERSE
+
+
+def test_header_grid_and_color_profile() -> None:
+    sprite = rgba_sprite()
+    sprite.grid = Grid(1, 2, 8, 8)
+    sprite.pixel_width = 2
+    sprite.pixel_height = 3
+    sprite.color_profile = ColorProfile(
+        kind=ColorProfileType.SRGB,
+        use_fixed_gamma=True,
+        gamma=0x10000,
+    )
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    assert loaded.grid == Grid(1, 2, 8, 8)
+    assert loaded.pixel_width == 2
+    assert loaded.pixel_height == 3
+    assert loaded.color_profile is not None
+    assert loaded.color_profile.kind is ColorProfileType.SRGB
+    assert loaded.color_profile.use_fixed_gamma is True
+    assert loaded.color_profile.gamma == 0x10000
+    sprite.color_profile = ColorProfile(kind=ColorProfileType.NONE)
+    none = Sprite.from_bytes(sprite.to_bytes())
+    assert none.color_profile is not None
+    assert none.color_profile.kind is ColorProfileType.NONE
+
+
+def test_raw_cel_roundtrip() -> None:
+    sprite = rgba_sprite(1, 1)
+    cel = sprite.frames[0].cel(0)
+    assert cel is not None
+    cel.raw = True
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    again = loaded.frames[0].cel(0)
+    assert again is not None
+    assert again.raw is True
+    assert again.pixels is not None
+    assert bytes(again.pixels.data) == b"\xff\x00\x00\xff"
+
+
+def test_unknown_chunk_roundtrip() -> None:
+    sprite = rgba_sprite()
+    sprite.unknown_chunks.append(UnknownChunk(0, CHUNK_PATH, b"path-data"))
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    assert loaded.unknown_chunks[0].chunk_type == CHUNK_PATH
+    assert loaded.unknown_chunks[0].data == b"path-data"
+
+
+def test_old_palette_4_roundtrip() -> None:
+    sprite = Sprite(1, 1, ColorMode.INDEXED)
+    sprite.palette = Palette([Color(1, 2, 3)])
+    sprite._had_old_palette_4 = True
+    data = sprite.to_bytes()
+    assert 0x0004 in chunk_types(data)
+    loaded = Sprite.from_bytes(data)
+    assert loaded.palette[0] == Color(1, 2, 3)
+    assert loaded._had_old_palette_4 is True
+
+
+def test_old_palette_11_reads_scaled_and_writes_old_4() -> None:
+    payload = Writer()
+    payload.u16(1)
+    payload.u8(0)
+    payload.u8(1)
+    payload.u8(16)
+    payload.u8(32)
+    payload.u8(48)
+    data = _document(_chunk(CHUNK_OLD_PALETTE_11, bytes(payload.buf)))
+    sprite = Sprite.from_bytes(data)
+    assert sprite.palette[0] == Color(64, 128, 192)
+    assert sprite._had_old_palette_11 is True
+    written = sprite.to_bytes()
+    types = chunk_types(written)
+    assert 0x0004 in types
+    assert 0x0011 not in types
+
+
+def test_external_tileset_and_base_index() -> None:
+    sprite = rgba_sprite()
+    sprite.external_files.append(ExternalFile(3, ExternalFileType.TILESET, "tiles.ase"))
+    sprite.tilesets.append(
+        Tileset(
+            id=0,
+            name="ext",
+            tile_count=4,
+            tile_width=8,
+            tile_height=8,
+            flags=TILESET_FLAG_EXTERNAL,
+            base_index=7,
+            external_file_id=3,
+            external_tileset_id=2,
+        )
+    )
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    tileset = loaded.tilesets[0]
+    assert tileset.flags & TILESET_FLAG_EXTERNAL
+    assert tileset.base_index == 7
+    assert tileset.external_file_id == 3
+    assert tileset.external_tileset_id == 2
+    assert loaded.external_files[0].kind is ExternalFileType.TILESET
+
+
+def test_slice_multiple_keys() -> None:
+    sprite = rgba_sprite()
+    sprite.slices.append(
+        Slice(
+            name="box",
+            keys=[
+                SliceKey(
+                    frame=0,
+                    x=0,
+                    y=0,
+                    width=2,
+                    height=2,
+                    nine_patch=NinePatch(0, 0, 1, 1),
+                    pivot=(1, 1),
+                ),
+                SliceKey(frame=1, x=1, y=1, width=1, height=1),
+            ],
+        )
+    )
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    keys = loaded.slices[0].keys
+    assert keys[0].nine_patch == NinePatch(0, 0, 1, 1)
+    assert keys[0].pivot == (1, 1)
+    assert keys[1].width == 1
+    assert keys[1].nine_patch == NinePatch(0, 0, 0, 0)
+    assert keys[1].pivot == (0, 0)
+
+
+def test_zero_duration_uses_header_speed() -> None:
+    sprite = Sprite.from_bytes(_document(duration=0, speed=50))
+    assert sprite.frames[0].duration_ms == 50
