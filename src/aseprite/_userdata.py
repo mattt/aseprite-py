@@ -65,9 +65,16 @@ def write_user_data(w: Writer, data: UserData) -> None:
         w.patch_u32(size_at, w.tell() - size_at)
 
 
+def _property_type(code: int) -> PropertyType:
+    try:
+        return PropertyType(code)
+    except ValueError as exc:
+        raise FormatError(f"unsupported property type {code:#06x}") from exc
+
+
 def _read_property(r: Reader, depth: int) -> UserProperty:
     name = r.string()
-    kind = PropertyType(r.u16())
+    kind = _property_type(r.u16())
     value = _read_value(r, kind, depth)
     return UserProperty(name=name, kind=kind, value=value)
 
@@ -119,10 +126,10 @@ def _read_value(r: Reader, kind: PropertyType, depth: int) -> object:
         if element == 0:
             values = []
             for _ in range(count):
-                item_kind = PropertyType(r.u16())
+                item_kind = _property_type(r.u16())
                 values.append((item_kind, _read_value(r, item_kind, depth + 1)))
             return (0, values)
-        item_kind = PropertyType(element)
+        item_kind = _property_type(element)
         values = [_read_value(r, item_kind, depth + 1) for _ in range(count)]
         return (element, values)
     if kind is PropertyType.PROPERTIES:

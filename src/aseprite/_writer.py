@@ -13,7 +13,6 @@ from aseprite._binary import (
     Writer,
 )
 from aseprite._model import (
-    HEADER_FLAG_LAYER_OPACITY,
     HEADER_FLAG_LAYER_UUID,
     TILESET_FLAG_EMBEDDED,
     TILESET_FLAG_EXTERNAL,
@@ -111,11 +110,12 @@ def write_sprite(sprite: Sprite) -> bytes:
                             iw, t.user_data or UserData()
                         ),
                     )
-                    ntiles = tileset.tile_count
-                    uds = list(tileset.tile_user_data) + [None] * max(
-                        0, ntiles - len(tileset.tile_user_data)
-                    )
-                    for tile_ud in uds[:ntiles]:
+                    uds = list(tileset.tile_user_data)
+                    while uds and uds[-1] is None:
+                        uds.pop()
+                    if len(uds) > tileset.tile_count:
+                        uds = uds[: tileset.tile_count]
+                    for tile_ud in uds:
                         emit_built(
                             CHUNK_USER_DATA,
                             lambda iw, u=tile_ud: write_user_data(iw, u or UserData()),
@@ -180,7 +180,7 @@ def write_sprite(sprite: Sprite) -> bytes:
 
 
 def _write_header(w: Writer, sprite: Sprite, file_size: int) -> None:
-    flags = sprite.flags | int(HEADER_FLAG_LAYER_OPACITY)
+    flags = sprite.flags
     w.u32(file_size)
     w.u16(FILE_MAGIC)
     w.u16(len(sprite.frames))
@@ -207,13 +207,7 @@ def _write_header(w: Writer, sprite: Sprite, file_size: int) -> None:
 
 
 def _should_write_old_palette(sprite: Sprite) -> bool:
-    if sprite._had_old_palette_4:
-        return True
-    if not sprite.palette.colors:
-        return False
-    if len(sprite.palette) > 256:
-        return False
-    return all(c.a == 255 for c in sprite.palette)
+    return sprite._had_old_palette_4 or sprite._had_old_palette_11
 
 
 def _write_old_palette(w: Writer, palette: Palette) -> None:
@@ -262,7 +256,7 @@ def _write_layer(w: Writer, layer, sprite: Sprite) -> None:  # noqa: ANN001
         w.pad(16)
 
 
-def _compress(data: bytes, original: bytes | None) -> bytes:
+def _compress(data: bytes | bytearray, original: bytes | None) -> bytes:
     if original is not None:
         try:
             if zlib.decompress(original) == data:

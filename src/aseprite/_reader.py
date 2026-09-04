@@ -15,7 +15,12 @@ from aseprite._binary import (
     Reader,
 )
 from aseprite._errors import FormatError
-from aseprite._limits import MAX_PALETTE_COLORS, MAX_UNCOMPRESSED_BYTES, bytes_per_tile
+from aseprite._limits import (
+    MAX_PALETTE_COLORS,
+    MAX_UNCOMPRESSED_BYTES,
+    DocumentBudget,
+    bytes_per_tile,
+)
 from aseprite._model import (
     HEADER_FLAG_GROUP_BLEND,
     HEADER_FLAG_LAYER_OPACITY,
@@ -102,7 +107,11 @@ def read_sprite(data: bytes) -> Sprite:
     grid_w = header.u16()
     grid_h = header.u16()
 
-    sprite = Sprite(width, height, color_mode, empty=True)
+    try:
+        sprite = Sprite(width, height, color_mode, empty=True)
+    except ValueError as exc:
+        raise FormatError(str(exc)) from exc
+    budget = DocumentBudget(MAX_UNCOMPRESSED_BYTES)
     sprite.valid_layer_opacity = bool(flags & HEADER_FLAG_LAYER_OPACITY)
     sprite.group_blend = bool(flags & HEADER_FLAG_GROUP_BLEND)
     sprite.deprecated_speed = speed
@@ -183,7 +192,7 @@ def read_sprite(data: bytes) -> Sprite:
                 tag_user_data_left = 0
                 sprite_ud_pending = False
             elif chunk_type == CHUNK_CEL:
-                cel = _read_cel(payload, color_mode)
+                cel = _read_cel(payload, color_mode, budget)
                 frame._cels[cel.layer_index] = cel
                 last_cel = cel
                 last_layer = None
@@ -258,7 +267,7 @@ def read_sprite(data: bytes) -> Sprite:
                 tag_user_data_left = 0
                 sprite_ud_pending = False
             elif chunk_type == CHUNK_TILESET:
-                tileset = _read_tileset(payload, color_mode)
+                tileset = _read_tileset(payload, color_mode, budget)
                 sprite.tilesets.append(tileset)
                 tileset_user_mode = tileset
                 tileset_tile_index = -1
@@ -348,9 +357,23 @@ def _read_layer(r: Reader, has_uuid: bool) -> Layer:
     return layer
 
 
-def _decompress(raw: bytes, max_size: int) -> bytes:
+def _pixels(
+    width: int,
+    height: int,
+    data: bytes,
+    color_mode: ColorMode,
+    compressed: bytes | None = None,
+) -> Pixels:
+    try:
+        return Pixels(width, height, data, color_mode, compressed=compressed)
+    except ValueError as exc:
+        raise FormatError(str(exc)) from exc
+
+
+def _decompress(raw: bytes, max_size: int, budget: DocumentBudget) -> bytes:
     if max_size > MAX_UNCOMPRESSED_BYTES:
         raise FormatError("decompressed data exceeds the size limit")
+    budget.allow(max_size)
     try:
         decoder = zlib.decompressobj()
         cap = max(max_size, 1)
@@ -359,17 +382,22 @@ def _decompress(raw: bytes, max_size: int) -> bytes:
             raise FormatError("decompressed data exceeds the size limit")
         if len(out) == cap and not decoder.eof and decoder.decompress(b"", 1):
             raise FormatError("decompressed data exceeds the size limit")
+        budget.charge(len(out))
         return out
     except zlib.error as exc:
         raise FormatError("cel image is not valid zlib data") from exc
 
 
-def _read_cel(r: Reader, color_mode: ColorMode) -> Cel:
+def _read_cel(r: Reader, color_mode: ColorMode, budget: DocumentBudget) -> Cel:
     layer_index = r.u16()
     x = r.i16()
     y = r.i16()
     opacity = r.u8()
-    cel_type = _enum(CelType, r.u16(), CelType.COMPRESSED)
+    cel_type_value = r.u16()
+    try:
+        cel_type = CelType(cel_type_value)
+    except ValueError as exc:
+        raise FormatError(f"unsupported cel type {cel_type_value}") from exc
     z_index = r.i16()
     r.skip(5)
     cel = Cel(layer_index=layer_index, x=x, y=y, opacity=opacity, z_index=z_index)
@@ -377,7 +405,8 @@ def _read_cel(r: Reader, color_mode: ColorMode) -> Cel:
         width = r.u16()
         height = r.u16()
         data = r.raw(r.remaining())
-        cel.pixels = Pixels(width, height, data, color_mode)
+        budget.charge(len(data))
+        cel.pixels = _pixels(width, height, data, color_mode)
         cel.raw = True
     elif cel_type is CelType.LINKED:
         cel.link = r.u16()
@@ -386,8 +415,8 @@ def _read_cel(r: Reader, color_mode: ColorMode) -> Cel:
         height = r.u16()
         compressed = r.raw(r.remaining())
         expected = width * height * color_mode.bytes_per_pixel
-        data = _decompress(compressed, expected)
-        cel.pixels = Pixels(width, height, data, color_mode, compressed=compressed)
+        data = _decompress(compressed, expected, budget)
+        cel.pixels = _pixels(width, height, data, color_mode, compressed=compressed)
     elif cel_type is CelType.COMPRESSED_TILEMAP:
         width = r.u16()
         height = r.u16()
@@ -399,7 +428,7 @@ def _read_cel(r: Reader, color_mode: ColorMode) -> Cel:
         r.skip(10)
         compressed = r.raw(r.remaining())
         expected = width * height * bytes_per_tile(bits)
-        tiles = _decompress(compressed, expected)
+        tiles = _decompress(compressed, expected, budget)
         cel.tilemap = Tilemap(
             width=width,
             height=height,
@@ -527,7 +556,7 @@ def _read_slice(r: Reader) -> Slice:
     return Slice(name=name, keys=keys)
 
 
-def _read_tileset(r: Reader, color_mode: ColorMode) -> Tileset:
+def _read_tileset(r: Reader, color_mode: ColorMode, budget: DocumentBudget) -> Tileset:
     tileset_id = r.u32()
     flags = r.u32()
     tile_count = r.u32()
@@ -547,11 +576,11 @@ def _read_tileset(r: Reader, color_mode: ColorMode) -> Tileset:
         length = r.u32()
         compressed = r.raw(length)
         expected = tile_width * tile_height * tile_count * color_mode.bytes_per_pixel
-        raw = _decompress(compressed, expected)
+        raw = _decompress(compressed, expected, budget)
         if len(raw) != expected:
             raise FormatError("tileset image size does not match tile dimensions")
         image_height = tile_height * tile_count
-        pixels = Pixels(
+        pixels = _pixels(
             tile_width, image_height, raw, color_mode, compressed=compressed
         )
     return Tileset(

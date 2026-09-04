@@ -97,35 +97,41 @@ class Writer:
     def tell(self) -> int:
         return len(self.buf)
 
-    def raw(self, data: bytes) -> None:
+    def raw(self, data: bytes | bytearray) -> None:
         self.buf.extend(data)
 
     def pad(self, n: int) -> None:
         self.buf.extend(b"\x00" * n)
 
+    def _pack(self, fmt: str, value: int) -> bytes:
+        try:
+            return struct.pack(fmt, value)
+        except struct.error as exc:
+            raise ValueError(f"integer {value} is out of range") from exc
+
     def u8(self, value: int) -> None:
-        self.buf.extend(struct.pack("<B", value & 0xFF))
+        self.buf.extend(self._pack("<B", value))
 
     def i8(self, value: int) -> None:
-        self.buf.extend(struct.pack("<b", value))
+        self.buf.extend(self._pack("<b", value))
 
     def u16(self, value: int) -> None:
-        self.buf.extend(struct.pack("<H", value & 0xFFFF))
+        self.buf.extend(self._pack("<H", value))
 
     def i16(self, value: int) -> None:
-        self.buf.extend(struct.pack("<h", value))
+        self.buf.extend(self._pack("<h", value))
 
     def u32(self, value: int) -> None:
-        self.buf.extend(struct.pack("<I", value & 0xFFFFFFFF))
+        self.buf.extend(self._pack("<I", value))
 
     def i32(self, value: int) -> None:
-        self.buf.extend(struct.pack("<i", value))
+        self.buf.extend(self._pack("<i", value))
 
     def u64(self, value: int) -> None:
-        self.buf.extend(struct.pack("<Q", value & 0xFFFFFFFFFFFFFFFF))
+        self.buf.extend(self._pack("<Q", value))
 
     def i64(self, value: int) -> None:
-        self.buf.extend(struct.pack("<q", value))
+        self.buf.extend(self._pack("<q", value))
 
     def f32(self, value: float) -> None:
         self.buf.extend(struct.pack("<f", value))
@@ -146,7 +152,7 @@ class Writer:
         self.raw(value)
 
     def patch_u32(self, offset: int, value: int) -> None:
-        self.buf[offset : offset + 4] = struct.pack("<I", value & 0xFFFFFFFF)
+        self.buf[offset : offset + 4] = self._pack("<I", value)
 
     def patch_u16(self, offset: int, value: int) -> None:
-        self.buf[offset : offset + 2] = struct.pack("<H", value & 0xFFFF)
+        self.buf[offset : offset + 2] = self._pack("<H", value)

@@ -50,3 +50,13 @@ def test_short_read_raises() -> None:
 def test_header_constants() -> None:
     assert HEADER_SIZE == 128
     assert FRAME_MAGIC == 0xF1FA
+
+
+def test_writer_rejects_out_of_range() -> None:
+    w = Writer()
+    with pytest.raises(ValueError, match="out of range"):
+        w.u16(0x10000)
+    with pytest.raises(ValueError, match="out of range"):
+        w.i16(40_000)
+    with pytest.raises(ValueError, match="out of range"):
+        w.u8(256)

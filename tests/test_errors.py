@@ -12,7 +12,13 @@ from aseprite._binary import (
     Writer,
 )
 from aseprite._limits import MAX_PALETTE_COLORS
-from aseprite._reader import CHUNK_CEL, CHUNK_PALETTE, CHUNK_TILESET, CHUNK_USER_DATA
+from aseprite._reader import (
+    CHUNK_CEL,
+    CHUNK_LAYER,
+    CHUNK_PALETTE,
+    CHUNK_TILESET,
+    CHUNK_USER_DATA,
+)
 
 
 def _header(
@@ -159,6 +165,123 @@ def test_decompress_rejects_extra_output() -> None:
     payload += zlib.compress(b"\x00" * 1024)
     with pytest.raises(FormatError, match="size limit"):
         Sprite.from_bytes(_document(_chunk(CHUNK_CEL, bytes(payload))))
+
+
+def test_zero_canvas_is_format_error() -> None:
+    with pytest.raises(FormatError, match="positive"):
+        Sprite.from_bytes(bytes(_header(width=0, height=1)) + _frame())
+
+
+def _raw_cel_payload(*, width: int = 1, height: int = 1, pixels: bytes) -> bytes:
+    w = Writer()
+    w.u16(0)
+    w.i16(0)
+    w.i16(0)
+    w.u8(255)
+    w.u16(0)
+    w.i16(0)
+    w.pad(5)
+    w.u16(width)
+    w.u16(height)
+    w.raw(pixels)
+    return bytes(w.buf)
+
+
+def test_short_cel_pixels_is_format_error() -> None:
+    with pytest.raises(FormatError, match="pixel data length"):
+        Sprite.from_bytes(
+            _document(
+                _chunk(CHUNK_CEL, _raw_cel_payload(width=2, height=2, pixels=b"\x00"))
+            )
+        )
+
+
+def test_unknown_cel_type_is_format_error() -> None:
+    w = Writer()
+    w.u16(0)
+    w.i16(0)
+    w.i16(0)
+    w.u8(255)
+    w.u16(99)
+    w.i16(0)
+    w.pad(5)
+    with pytest.raises(FormatError, match="unsupported cel type"):
+        Sprite.from_bytes(_document(_chunk(CHUNK_CEL, bytes(w.buf))))
+
+
+def test_unknown_property_type_is_format_error() -> None:
+    layer = Writer()
+    layer.u16(3)
+    layer.u16(0)
+    layer.u16(0)
+    layer.u16(0)
+    layer.u16(0)
+    layer.u16(0)
+    layer.u8(255)
+    layer.pad(3)
+    layer.string("L")
+    user = Writer()
+    user.u32(4)
+    size_at = user.tell()
+    user.u32(0)
+    user.u32(1)
+    user.u32(0)
+    user.u32(1)
+    user.string("x")
+    user.u16(0xFFFF)
+    user.patch_u32(size_at, user.tell() - size_at)
+    with pytest.raises(FormatError, match="unsupported property type"):
+        Sprite.from_bytes(
+            _document(
+                _chunk(CHUNK_LAYER, bytes(layer.buf)),
+                _chunk(CHUNK_USER_DATA, bytes(user.buf)),
+            )
+        )
+
+
+def test_document_byte_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aseprite._reader.MAX_UNCOMPRESSED_BYTES", 6)
+    cel = _chunk(CHUNK_CEL, _raw_cel_payload(pixels=b"\x00\x00\x00\xff"))
+
+    def frame_with(*chunks: bytes) -> bytes:
+        body = b"".join(chunks)
+        frame = bytearray(16 + len(body))
+        frame[0:4] = (16 + len(body)).to_bytes(4, "little")
+        frame[4:6] = FRAME_MAGIC.to_bytes(2, "little")
+        frame[6:8] = len(chunks).to_bytes(2, "little")
+        frame[8:10] = (100).to_bytes(2, "little")
+        frame[12:16] = len(chunks).to_bytes(4, "little")
+        frame[16:] = body
+        return bytes(frame)
+
+    header = _header(frames=2)
+    payload = frame_with(cel) + frame_with(cel)
+    header[0:4] = (HEADER_SIZE + len(payload)).to_bytes(4, "little")
+    with pytest.raises(FormatError, match="size limit"):
+        Sprite.from_bytes(bytes(header) + payload)
+
+
+def test_tileset_user_data_write_does_not_pad() -> None:
+    tileset = Writer()
+    tileset.u32(0)
+    tileset.u32(0)
+    tileset.u32(10_000_000)
+    tileset.u16(16)
+    tileset.u16(16)
+    tileset.i16(1)
+    tileset.pad(14)
+    tileset.string("t")
+    user = Writer()
+    user.u32(1)
+    user.string("note")
+    sprite = Sprite.from_bytes(
+        _document(
+            _chunk(CHUNK_TILESET, bytes(tileset.buf)),
+            _chunk(CHUNK_USER_DATA, bytes(user.buf)),
+        )
+    )
+    data = sprite.to_bytes()
+    assert len(data) < 100_000
 
 
 def test_tileset_user_data_does_not_preallocate() -> None:
