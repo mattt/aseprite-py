@@ -2,6 +2,7 @@ import pytest
 
 from aseprite._binary import FILE_MAGIC, FRAME_MAGIC, HEADER_SIZE, Reader, Writer
 from aseprite._errors import FormatError
+from aseprite._limits import bytes_per_tile
 
 
 def test_roundtrip_primitives() -> None:
@@ -60,3 +61,36 @@ def test_writer_rejects_out_of_range() -> None:
         w.i16(40_000)
     with pytest.raises(ValueError, match="out of range"):
         w.u8(256)
+
+
+def test_reader_skip_and_writer_pad_patch() -> None:
+    w = Writer()
+    start = w.tell()
+    w.u16(0)
+    w.pad(2)
+    w.patch_u16(start, 7)
+    w.patch_u32(start, 0x11223344)
+    r = Reader(bytes(w.buf))
+    r.skip(2)
+    assert r.u16() == 0x1122
+    assert w.tell() == 4
+
+
+def test_writer_string_and_uuid_limits() -> None:
+    w = Writer()
+    with pytest.raises(ValueError, match="WORD length"):
+        w.string("x" * 0x10000)
+    with pytest.raises(ValueError, match="16 bytes"):
+        w.uuid(b"short")
+
+
+def test_reader_invalid_utf8() -> None:
+    r = Reader((3).to_bytes(2, "little") + b"\xff\xff\xff")
+    with pytest.raises(FormatError, match="UTF-8"):
+        r.string()
+
+
+def test_bytes_per_tile() -> None:
+    assert bytes_per_tile(32) == 4
+    assert bytes_per_tile(16) == 2
+    assert bytes_per_tile(8) == 1

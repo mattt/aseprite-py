@@ -2,10 +2,9 @@ import zlib
 
 import pytest
 
-from aseprite import FormatError, Sprite
+from aseprite import AsepriteError, Cel, ColorMode, FormatError, Pixels, Sprite
 from aseprite._binary import (
     CHUNK_HEADER_SIZE,
-    FILE_MAGIC,
     FRAME_HEADER_SIZE,
     FRAME_MAGIC,
     HEADER_SIZE,
@@ -19,33 +18,14 @@ from aseprite._reader import (
     CHUNK_TILESET,
     CHUNK_USER_DATA,
 )
-
-
-def _header(
-    *,
-    magic: int = FILE_MAGIC,
-    frames: int = 1,
-    width: int = 1,
-    height: int = 1,
-    depth: int = 32,
-) -> bytearray:
-    data = bytearray(HEADER_SIZE)
-    data[0:4] = (HEADER_SIZE + 16).to_bytes(4, "little")
-    data[4:6] = magic.to_bytes(2, "little")
-    data[6:8] = frames.to_bytes(2, "little")
-    data[8:10] = width.to_bytes(2, "little")
-    data[10:12] = height.to_bytes(2, "little")
-    data[12:14] = depth.to_bytes(2, "little")
-    return data
-
-
-def _frame(chunks: int = 0) -> bytes:
-    buf = bytearray(16)
-    buf[0:4] = (16).to_bytes(4, "little")
-    buf[4:6] = FRAME_MAGIC.to_bytes(2, "little")
-    buf[6:8] = chunks.to_bytes(2, "little")
-    buf[8:10] = (100).to_bytes(2, "little")
-    return bytes(buf)
+from aseprite._userdata import write_user_data
+from tests.helpers import (
+    _chunk,
+    _document,
+    _frame,
+    _header,
+    _raw_cel_payload,
+)
 
 
 def test_short_file() -> None:
@@ -92,35 +72,13 @@ def test_chunk_exceeds_frame() -> None:
 
 def test_invalid_zlib() -> None:
     sprite = Sprite(1, 1)
-    from aseprite import ColorMode, Pixels
-
     sprite.frames[0].set_cel(
         sprite.layers[0], Pixels(1, 1, b"\x00\x00\x00\x00", ColorMode.RGBA)
     )
     raw = bytearray(sprite.to_bytes())
-    # Corrupt the zlib stream near the end of the file.
     raw[-4:] = b"\x00\x00\x00\x00"
     with pytest.raises(FormatError):
         Sprite.from_bytes(bytes(raw))
-
-
-def _chunk(chunk_type: int, payload: bytes) -> bytes:
-    size = 6 + len(payload)
-    return size.to_bytes(4, "little") + chunk_type.to_bytes(2, "little") + payload
-
-
-def _document(*chunks: bytes, width: int = 1, height: int = 1) -> bytes:
-    body = b"".join(chunks)
-    frame = bytearray(16 + len(body))
-    frame[0:4] = (16 + len(body)).to_bytes(4, "little")
-    frame[4:6] = FRAME_MAGIC.to_bytes(2, "little")
-    frame[6:8] = len(chunks).to_bytes(2, "little")
-    frame[8:10] = (100).to_bytes(2, "little")
-    frame[12:16] = len(chunks).to_bytes(4, "little")
-    frame[16:] = body
-    header = _header(width=width, height=height)
-    header[0:4] = (HEADER_SIZE + len(frame)).to_bytes(4, "little")
-    return bytes(header) + bytes(frame)
 
 
 def test_palette_size_limit() -> None:
@@ -170,21 +128,6 @@ def test_decompress_rejects_extra_output() -> None:
 def test_zero_canvas_is_format_error() -> None:
     with pytest.raises(FormatError, match="positive"):
         Sprite.from_bytes(bytes(_header(width=0, height=1)) + _frame())
-
-
-def _raw_cel_payload(*, width: int = 1, height: int = 1, pixels: bytes) -> bytes:
-    w = Writer()
-    w.u16(0)
-    w.i16(0)
-    w.i16(0)
-    w.u8(255)
-    w.u16(0)
-    w.i16(0)
-    w.pad(5)
-    w.u16(width)
-    w.u16(height)
-    w.raw(pixels)
-    return bytes(w.buf)
 
 
 def test_short_cel_pixels_is_format_error() -> None:
@@ -304,3 +247,157 @@ def test_tileset_user_data_does_not_preallocate() -> None:
     )
     assert sprite.tilesets[0].tile_count == 10_000_000
     assert sprite.tilesets[0].tile_user_data == []
+
+
+def test_truncated_chunk_header() -> None:
+    header = _header()
+    frame = bytearray(FRAME_HEADER_SIZE + 3)
+    frame[0:4] = (FRAME_HEADER_SIZE + 3).to_bytes(4, "little")
+    frame[4:6] = FRAME_MAGIC.to_bytes(2, "little")
+    frame[6:8] = (1).to_bytes(2, "little")
+    frame[8:10] = (100).to_bytes(2, "little")
+    frame[12:16] = (1).to_bytes(4, "little")
+    header[0:4] = (HEADER_SIZE + len(frame)).to_bytes(4, "little")
+    with pytest.raises(FormatError, match="truncated chunk header"):
+        Sprite.from_bytes(bytes(header) + bytes(frame))
+
+
+def test_chunk_size_too_small() -> None:
+    with pytest.raises(FormatError, match="smaller than 6"):
+        Sprite.from_bytes(
+            _document((5).to_bytes(4, "little") + (0).to_bytes(2, "little"))
+        )
+
+
+def test_palette_index_range_invalid() -> None:
+    payload = bytearray()
+    payload += (2).to_bytes(4, "little")
+    payload += (1).to_bytes(4, "little")
+    payload += (0).to_bytes(4, "little")
+    payload += bytes(8)
+    with pytest.raises(FormatError, match="palette index range"):
+        Sprite.from_bytes(_document(_chunk(CHUNK_PALETTE, bytes(payload))))
+
+
+def test_tileset_image_size_mismatch() -> None:
+    tileset = Writer()
+    tileset.u32(0)
+    tileset.u32(2)
+    tileset.u32(1)
+    tileset.u16(2)
+    tileset.u16(2)
+    tileset.i16(1)
+    tileset.pad(14)
+    tileset.string("t")
+    compressed = zlib.compress(b"\x00\x00\x00\xff")
+    tileset.u32(len(compressed))
+    tileset.raw(compressed)
+    with pytest.raises(FormatError, match="tile dimensions"):
+        Sprite.from_bytes(_document(_chunk(CHUNK_TILESET, bytes(tileset.buf))))
+
+
+def test_user_data_properties_exceed_size() -> None:
+    user = Writer()
+    user.u32(4)
+    user.u32(8)
+    user.u32(1)
+    user.u32(0)
+    user.u32(1)
+    user.string("x")
+    user.u16(6)
+    user.i32(1)
+    with pytest.raises(FormatError, match="exceed declared size"):
+        Sprite.from_bytes(_document(_chunk(CHUNK_USER_DATA, bytes(user.buf))))
+
+
+def test_user_data_nesting_exceeds_limit() -> None:
+    from aseprite import PropertiesMap, PropertyType, UserData, UserProperty
+
+    prop: UserProperty = UserProperty("n", PropertyType.INT32, 1)
+    for _ in range(129):
+        prop = UserProperty("p", PropertyType.PROPERTIES, [prop])
+    with pytest.raises(ValueError, match="nesting"):
+        write_user_data(Writer(), UserData(properties=[PropertiesMap(0, [prop])]))
+
+
+def test_user_data_read_nesting_exceeds_limit() -> None:
+    from aseprite import PropertyType
+
+    inner = Writer()
+
+    def nest(depth: int) -> None:
+        inner.string("n")
+        inner.u16(int(PropertyType.PROPERTIES))
+        if depth == 0:
+            inner.u32(0)
+            return
+        inner.u32(1)
+        nest(depth - 1)
+
+    nest(129)
+    user = Writer()
+    user.u32(4)
+    size_at = user.tell()
+    user.u32(0)
+    user.u32(1)
+    user.u32(0)
+    user.u32(1)
+    user.raw(bytes(inner.buf))
+    user.patch_u32(size_at, user.tell() - size_at)
+    with pytest.raises(FormatError, match="nesting"):
+        Sprite.from_bytes(_document(_chunk(CHUNK_USER_DATA, bytes(user.buf))))
+
+
+def test_user_data_write_rejects_bad_values() -> None:
+    from aseprite import PropertiesMap, PropertyType, UserData, UserProperty
+
+    w = Writer()
+    with pytest.raises(ValueError, match="integer"):
+        write_user_data(
+            w,
+            UserData(
+                properties=[
+                    PropertiesMap(0, [UserProperty("x", PropertyType.INT32, "bad")])
+                ]
+            ),
+        )
+    with pytest.raises(ValueError, match="pair"):
+        write_user_data(
+            w,
+            UserData(
+                properties=[
+                    PropertiesMap(0, [UserProperty("p", PropertyType.POINT, (1,))])
+                ]
+            ),
+        )
+    with pytest.raises(ValueError, match="UUID"):
+        write_user_data(
+            w,
+            UserData(
+                properties=[
+                    PropertiesMap(0, [UserProperty("u", PropertyType.UUID, "nope")])
+                ]
+            ),
+        )
+
+
+def test_cel_without_pixels_cannot_write() -> None:
+    sprite = Sprite(1, 1)
+    sprite.frames[0]._cels[0] = Cel(layer_index=0)
+    with pytest.raises(ValueError, match="no pixel data"):
+        sprite.to_bytes()
+
+
+def test_open_rejects_text_file() -> None:
+    from io import StringIO
+    from typing import Any
+
+    source: Any = StringIO("not binary")
+    with pytest.raises(TypeError, match="binary"):
+        Sprite.open(source)
+
+
+def test_format_error_is_aseprite_error() -> None:
+    assert issubclass(FormatError, AsepriteError)
+    with pytest.raises(AsepriteError):
+        Sprite.from_bytes(b"short")
