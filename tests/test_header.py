@@ -4,7 +4,7 @@ from aseprite._binary import FILE_MAGIC, FRAME_MAGIC, HEADER_SIZE, Reader
 
 def test_written_header_and_frame() -> None:
     sprite = Sprite(8, 4)
-    sprite.add_frame(33)
+    sprite.frames[0].duration_ms = 33
     data = sprite.to_bytes()
     assert len(data) >= HEADER_SIZE + 16
     header = Reader(data, 0, HEADER_SIZE)

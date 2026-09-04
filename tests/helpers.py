@@ -8,8 +8,8 @@ def rgba_sprite(
     color: bytes = b"\xff\x00\x00\xff",
 ) -> Sprite:
     sprite = Sprite(width, height, ColorMode.RGBA)
-    layer = sprite.add_layer("Layer 1")
-    frame = sprite.add_frame(100)
     data = color * (width * height)
-    frame.set_cel(layer, Pixels(width, height, data, ColorMode.RGBA))
+    sprite.frames[0].set_cel(
+        sprite.layers[0], Pixels(width, height, data, ColorMode.RGBA)
+    )
     return sprite

@@ -58,7 +58,7 @@ def test_odango_face_groups() -> None:
         pytest.skip("odango_face.aseprite is missing")
     sprite = Sprite.open(path)
     assert sprite.width == 341
-    assert sprite.layers["neutral"].type is LayerType.GROUP
+    assert sprite.layers["neutral"].kind is LayerType.GROUP
     names = [ly.name for ly in sprite.layers]
     assert names.count("base") == 5
     assert [t.name for t in sprite.tags] == ["visemes", "blink"]

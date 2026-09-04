@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from os import PathLike, fspath
 from pathlib import Path
+from typing import TYPE_CHECKING, BinaryIO
 
-from aseprite._errors import AsepriteError
 from aseprite._model import (
     BlendMode,
     Cel,
@@ -13,32 +14,57 @@ from aseprite._model import (
     ExternalFile,
     Frame,
     Grid,
+    HeaderFlags,
     Layer,
     LayerList,
     LayerType,
     LoopDirection,
     Mask,
     Palette,
+    Pixels,
     Slice,
+    SliceKey,
+    SliceList,
     Tag,
     TagList,
     Tileset,
+    TilesetList,
     UnknownChunk,
     UserData,
-    _reindex_layers,
-    descendants_end,
 )
+
+if TYPE_CHECKING:
+    from PIL.Image import Image as PILImage
+
+
+def _read_source(source: str | PathLike[str] | BinaryIO) -> bytes:
+    if isinstance(source, (str, PathLike)):
+        return Path(fspath(source)).read_bytes()
+    data = source.read()
+    if not isinstance(data, bytes | bytearray):
+        raise TypeError("open() requires a binary file object")
+    return bytes(data)
+
+
+def _write_dest(dest: str | PathLike[str] | BinaryIO, data: bytes) -> None:
+    if isinstance(dest, (str, PathLike)):
+        Path(fspath(dest)).write_bytes(data)
+        return
+    dest.write(data)
 
 
 class Sprite:
     """An Aseprite document: canvas, layers, frames, and related data.
 
-    Construct an empty sprite, or open a ``.ase`` / ``.aseprite`` file.
+    Construct a sprite, or open a ``.ase`` / ``.aseprite`` file.
+    A new sprite has one layer named ``Layer 1`` and one frame.
+    Pass ``empty=True`` to start with no layers or frames.
 
     Args:
         width: Canvas width in pixels.
         height: Canvas height in pixels.
         color_mode: The pixel format. The default is RGBA.
+        empty: If true, do not add a default layer or frame.
     """
 
     def __init__(
@@ -46,13 +72,16 @@ class Sprite:
         width: int,
         height: int,
         color_mode: ColorMode = ColorMode.RGBA,
+        *,
+        empty: bool = False,
     ) -> None:
         if width <= 0 or height <= 0:
-            raise AsepriteError("sprite dimensions must be positive")
+            raise ValueError("sprite dimensions must be positive")
         self.width = width
         self.height = height
         self.color_mode = color_mode
-        self.flags = 1
+        self.valid_layer_opacity = True
+        self.group_blend = False
         self.deprecated_speed = 0
         self.transparent_index = 0
         self.num_colors = 0
@@ -64,8 +93,8 @@ class Sprite:
         self.layers = LayerList()
         self.frames: list[Frame] = []
         self.tags = TagList()
-        self.slices: list[Slice] = []
-        self.tilesets: list[Tileset] = []
+        self.slices = SliceList()
+        self.tilesets = TilesetList()
         self.external_files: list[ExternalFile] = []
         self.masks: list[Mask] = []
         self.user_data: UserData | None = None
@@ -73,15 +102,35 @@ class Sprite:
         self._file_size = 0
         self._had_old_palette_4 = False
         self._had_old_palette_11 = False
+        if not empty:
+            self.add_layer("Layer 1")
+            self.add_frame()
+
+    @property
+    def size(self) -> tuple[int, int]:
+        """Returns ``(width, height)`` in pixels."""
+        return (self.width, self.height)
+
+    @property
+    def flags(self) -> int:
+        """Returns the header flag bits from the file format."""
+        value = 0
+        if self.valid_layer_opacity:
+            value |= HeaderFlags.LAYER_OPACITY
+        if self.group_blend:
+            value |= HeaderFlags.GROUP_BLEND
+        if any(layer.uuid is not None for layer in self.layers):
+            value |= HeaderFlags.LAYER_UUID
+        return int(value)
 
     @classmethod
-    def open(cls, path: str | Path) -> Sprite:
-        """Opens and returns the sprite at the given path.
+    def open(cls, source: str | PathLike[str] | BinaryIO) -> Sprite:
+        """Opens and returns a sprite from a path or binary file object.
 
         The file must be a valid ``.ase`` or ``.aseprite`` document.
 
         Args:
-            path: The path to the sprite file.
+            source: A path or a binary file object.
 
         Returns:
             The parsed sprite.
@@ -90,7 +139,7 @@ class Sprite:
             FormatError: If the file is not a valid Aseprite document.
             OSError: If the file cannot be read.
         """
-        return cls.from_bytes(Path(path).read_bytes())
+        return cls.from_bytes(_read_source(source))
 
     @classmethod
     def from_bytes(cls, data: bytes) -> Sprite:
@@ -107,32 +156,44 @@ class Sprite:
         """
         from aseprite._reader import read_sprite
 
-        result = read_sprite(data)
-        if not isinstance(result, Sprite):
-            raise AsepriteError("parser did not return a sprite")
-        return result
+        return read_sprite(data)
 
-    def save(self, path: str | Path) -> None:
-        """Writes this sprite to the given path.
+    def save(self, dest: str | PathLike[str] | BinaryIO) -> None:
+        """Writes this sprite to a path or binary file object.
 
         Args:
-            path: The destination path.
+            dest: The destination path or a binary file object.
 
         Raises:
-            AsepriteError: If the sprite cannot be encoded.
+            ValueError: If the sprite cannot be encoded.
             OSError: If the file cannot be written.
         """
-        Path(path).write_bytes(self.to_bytes())
+        _write_dest(dest, self.to_bytes())
 
     def to_bytes(self) -> bytes:
         """Returns this sprite encoded as Aseprite file bytes.
 
         Raises:
-            AsepriteError: If the sprite cannot be encoded.
+            ValueError: If the sprite cannot be encoded.
         """
         from aseprite._writer import write_sprite
 
         return write_sprite(self)
+
+    def blank_pixels(
+        self, width: int | None = None, height: int | None = None
+    ) -> Pixels:
+        """Returns a transparent buffer in this sprite's color mode.
+
+        Args:
+            width: Buffer width. The default is the canvas width.
+            height: Buffer height. The default is the canvas height.
+        """
+        return Pixels.blank(
+            self.width if width is None else width,
+            self.height if height is None else height,
+            self.color_mode,
+        )
 
     def add_frame(self, duration_ms: int = 100) -> Frame:
         """Appends a frame and returns it.
@@ -149,7 +210,7 @@ class Sprite:
         name: str,
         *,
         parent: Layer | None = None,
-        layer_type: LayerType = LayerType.IMAGE,
+        kind: LayerType = LayerType.IMAGE,
         blend_mode: BlendMode = BlendMode.NORMAL,
         opacity: int = 255,
         tileset_index: int | None = None,
@@ -159,14 +220,14 @@ class Sprite:
         Args:
             name: The layer name.
             parent: An optional group that contains the new layer.
-            layer_type: Image, group, or tilemap.
+            kind: Image, group, or tilemap.
             blend_mode: The layer blend mode.
             opacity: Layer opacity from 0 to 255.
             tileset_index: The tileset referenced by a tilemap layer.
         """
         layer = Layer(
             name=name,
-            type=layer_type,
+            kind=kind,
             blend_mode=blend_mode,
             opacity=opacity,
             tileset_index=tileset_index,
@@ -176,10 +237,9 @@ class Sprite:
             self.layers.append(layer)
         else:
             layer.child_level = parent.child_level + 1
-            insert_at = descendants_end(self.layers.as_list(), parent)
+            insert_at = self.layers._descendants_end(parent)
             self.layers.insert(insert_at, layer)
             self._remap_cels_after_insert(insert_at)
-        _reindex_layers(self.layers.as_list())
         return layer
 
     def _remap_cels_after_insert(self, insert_at: int) -> None:
@@ -220,12 +280,54 @@ class Sprite:
         self.tags.append(tag)
         return tag
 
+    def add_slice(self, name: str, keys: list[SliceKey] | None = None) -> Slice:
+        """Adds a slice and returns it.
+
+        Args:
+            name: The slice name.
+            keys: Optional slice keys. The default is an empty list.
+        """
+        sl = Slice(name=name, keys=list(keys or []))
+        self.slices.append(sl)
+        return sl
+
+    def add_tileset(
+        self,
+        name: str,
+        tile_width: int,
+        tile_height: int,
+        tile_count: int,
+        *,
+        pixels: Pixels | None = None,
+        tileset_id: int | None = None,
+    ) -> Tileset:
+        """Adds a tileset and returns it.
+
+        Args:
+            name: The tileset name.
+            tile_width: Width of one tile, in pixels.
+            tile_height: Height of one tile, in pixels.
+            tile_count: The number of tiles.
+            pixels: Optional embedded tile image.
+            tileset_id: File-format tileset ID. The default is the next index.
+        """
+        tileset = Tileset(
+            id=len(self.tilesets) if tileset_id is None else tileset_id,
+            name=name,
+            tile_count=tile_count,
+            tile_width=tile_width,
+            tile_height=tile_height,
+            pixels=pixels,
+        )
+        self.tilesets.append(tileset)
+        return tileset
+
     def flatten(self, frame: int = 0) -> bytes:
         """Composites the given frame and returns RGBA8 bytes.
 
         Hidden layers are skipped.
         Linked cels are resolved.
-        Group isolation follows header flag 2.
+        Group isolation follows ``group_blend``.
         Only the Normal blend mode is applied.
 
         Args:
@@ -235,13 +337,13 @@ class Sprite:
             ``width * height * 4`` bytes in RGBA order.
 
         Raises:
-            AsepriteError: If the frame index is out of range.
+            IndexError: If the frame index is out of range.
         """
         from aseprite._render import flatten_frame
 
         return flatten_frame(self, frame)
 
-    def image(self, frame: int = 0):  # noqa: ANN201
+    def image(self, frame: int = 0) -> PILImage:
         """Composites the given frame and returns a Pillow image.
 
         Requires the ``aseprite[image]`` extra.
@@ -254,7 +356,7 @@ class Sprite:
 
         Raises:
             ImportError: If Pillow is not installed.
-            AsepriteError: If the frame index is out of range.
+            IndexError: If the frame index is out of range.
         """
         try:
             from PIL import Image
@@ -265,6 +367,13 @@ class Sprite:
         data = self.flatten(frame)
         return Image.frombytes("RGBA", (self.width, self.height), data)
 
+    def __repr__(self) -> str:
+        return (
+            f"Sprite(width={self.width}, height={self.height}, "
+            f"color_mode={self.color_mode.name}, "
+            f"frames={len(self.frames)}, layers={len(self.layers)})"
+        )
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Sprite):
             return NotImplemented
@@ -272,6 +381,8 @@ class Sprite:
             self.width == other.width
             and self.height == other.height
             and self.color_mode == other.color_mode
+            and self.valid_layer_opacity == other.valid_layer_opacity
+            and self.group_blend == other.group_blend
             and self.transparent_index == other.transparent_index
             and self.pixel_width == other.pixel_width
             and self.pixel_height == other.pixel_height

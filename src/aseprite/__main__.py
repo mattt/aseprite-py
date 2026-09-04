@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         sprite = Sprite.open(args.path)
-    except (AsepriteError, OSError) as exc:
+    except (AsepriteError, OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         image = sprite.image(args.frame)
-    except (AsepriteError, ImportError) as exc:
+    except (AsepriteError, ImportError, IndexError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     image.save(args.output)
@@ -66,7 +66,7 @@ def _print_info(sprite: Sprite, path: Path) -> None:
     print(f"layers: {len(sprite.layers)}")
     for layer in sprite.layers:
         indent = "  " * (layer.child_level + 1)
-        print(f"{indent}{layer.name} ({layer.type.name})")
+        print(f"{indent}{layer.name} ({layer.kind.name})")
     print(f"tags: {len(sprite.tags)}")
     for tag in sprite.tags:
         print(f"  {tag.name} {tag.from_frame}-{tag.to_frame}")

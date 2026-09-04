@@ -86,11 +86,11 @@ def test_chunk_exceeds_frame() -> None:
 
 def test_invalid_zlib() -> None:
     sprite = Sprite(1, 1)
-    layer = sprite.add_layer("L")
-    frame = sprite.add_frame(100)
     from aseprite import ColorMode, Pixels
 
-    frame.set_cel(layer, Pixels(1, 1, b"\x00\x00\x00\x00", ColorMode.RGBA))
+    sprite.frames[0].set_cel(
+        sprite.layers[0], Pixels(1, 1, b"\x00\x00\x00\x00", ColorMode.RGBA)
+    )
     raw = bytearray(sprite.to_bytes())
     # Corrupt the zlib stream near the end of the file.
     raw[-4:] = b"\x00\x00\x00\x00"

@@ -136,13 +136,13 @@ class Writer:
     def string(self, value: str) -> None:
         encoded = value.encode("utf-8")
         if len(encoded) > 0xFFFF:
-            raise FormatError("string exceeds WORD length")
+            raise ValueError("string exceeds WORD length")
         self.u16(len(encoded))
         self.raw(encoded)
 
     def uuid(self, value: bytes) -> None:
         if len(value) != 16:
-            raise FormatError("UUID must be 16 bytes")
+            raise ValueError("UUID must be 16 bytes")
         self.raw(value)
 
     def patch_u32(self, offset: int, value: int) -> None:

@@ -5,6 +5,8 @@ This package implements the
 It does not run the Aseprite application or execute Lua.
 """
 
+from importlib.metadata import PackageNotFoundError, version
+
 from aseprite._errors import AsepriteError, FormatError
 from aseprite._model import (
     BlendMode,
@@ -18,6 +20,7 @@ from aseprite._model import (
     ExternalFileType,
     Frame,
     Grid,
+    HeaderFlags,
     Layer,
     LayerType,
     LoopDirection,
@@ -32,10 +35,16 @@ from aseprite._model import (
     Tag,
     Tilemap,
     Tileset,
+    UnknownChunk,
     UserData,
     UserProperty,
 )
 from aseprite._sprite import Sprite
+
+try:
+    __version__ = version("aseprite")
+except PackageNotFoundError:
+    __version__ = "0.1.0"
 
 __all__ = [
     "AsepriteError",
@@ -51,6 +60,7 @@ __all__ = [
     "FormatError",
     "Frame",
     "Grid",
+    "HeaderFlags",
     "Layer",
     "LayerType",
     "LoopDirection",
@@ -66,6 +76,8 @@ __all__ = [
     "Tag",
     "Tilemap",
     "Tileset",
+    "UnknownChunk",
     "UserData",
     "UserProperty",
+    "__version__",
 ]

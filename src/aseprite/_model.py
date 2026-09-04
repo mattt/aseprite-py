@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, MutableSequence, Sequence
 from dataclasses import dataclass, field
-from enum import IntEnum
+from enum import IntEnum, IntFlag
+from typing import Protocol, cast, overload
 from uuid import UUID
-
-from aseprite._errors import AsepriteError
 
 
 class ColorMode(IntEnum):
@@ -90,6 +89,14 @@ class ExternalFileType(IntEnum):
     EXTENSION_TILE_MGMT = 3
 
 
+class HeaderFlags(IntFlag):
+    """Header flag bits from the Aseprite spec."""
+
+    LAYER_OPACITY = 1
+    GROUP_BLEND = 2
+    LAYER_UUID = 4
+
+
 class PropertyType(IntEnum):
     """A typed user-data property from the Aseprite spec."""
 
@@ -114,9 +121,9 @@ class PropertyType(IntEnum):
     UUID = 0x0013
 
 
-HEADER_FLAG_LAYER_OPACITY = 1
-HEADER_FLAG_GROUP_BLEND = 2
-HEADER_FLAG_LAYER_UUID = 4
+HEADER_FLAG_LAYER_OPACITY = HeaderFlags.LAYER_OPACITY
+HEADER_FLAG_GROUP_BLEND = HeaderFlags.GROUP_BLEND
+HEADER_FLAG_LAYER_UUID = HeaderFlags.LAYER_UUID
 
 LAYER_FLAG_VISIBLE = 1
 LAYER_FLAG_EDITABLE = 2
@@ -151,9 +158,9 @@ class Pixels:
     def __post_init__(self) -> None:
         expected = self.width * self.height * self.color_mode.bytes_per_pixel
         if self.width < 0 or self.height < 0:
-            raise AsepriteError("pixel dimensions must be non-negative")
+            raise ValueError("pixel dimensions must be non-negative")
         if len(self.data) != expected:
-            raise AsepriteError(
+            raise ValueError(
                 f"pixel data length {len(self.data)} does not match {expected}"
             )
 
@@ -167,16 +174,78 @@ class Pixels:
             color_mode,
         )
 
+    def _offset(self, key: object) -> int:
+        if not isinstance(key, tuple) or len(key) != 2:
+            raise TypeError("pixel index must be (x, y)")
+        x, y = key
+        if not isinstance(x, int) or not isinstance(y, int):
+            raise TypeError("pixel index must be (x, y)")
+        if x < 0 or y < 0 or x >= self.width or y >= self.height:
+            raise IndexError(f"pixel ({x}, {y}) is out of range")
+        return (y * self.width + x) * self.color_mode.bytes_per_pixel
+
+    def __getitem__(self, key: tuple[int, int]) -> Color | int:
+        i = self._offset(key)
+        bpp = self.color_mode.bytes_per_pixel
+        pixel = self.data[i : i + bpp]
+        if self.color_mode is ColorMode.RGBA:
+            return Color(pixel[0], pixel[1], pixel[2], pixel[3])
+        if self.color_mode is ColorMode.GRAYSCALE:
+            return Color(pixel[0], pixel[0], pixel[0], pixel[1])
+        return pixel[0]
+
+    def __setitem__(
+        self, key: tuple[int, int], value: Color | Sequence[int] | int
+    ) -> None:
+        i = self._offset(key)
+        packed = _pack_pixel(self.color_mode, value)
+        data = bytearray(self.data)
+        data[i : i + len(packed)] = packed
+        self.data = bytes(data)
+
+    def __buffer__(self, _flags: int) -> memoryview:
+        return memoryview(self.data)
+
+
+def _pack_pixel(color_mode: ColorMode, value: Color | Sequence[int] | int) -> bytes:
+    if color_mode is ColorMode.INDEXED:
+        if isinstance(value, int):
+            return bytes((value & 0xFF,))
+        if isinstance(value, Color):
+            return bytes((value.r & 0xFF,))
+        if isinstance(value, Sequence) and len(value) >= 1:
+            return bytes((int(value[0]) & 0xFF,))
+        raise TypeError("indexed pixel must be an integer")
+    if color_mode is ColorMode.GRAYSCALE:
+        if isinstance(value, Color):
+            return bytes((value.r & 0xFF, value.a & 0xFF))
+        if isinstance(value, Sequence) and len(value) >= 2:
+            return bytes((int(value[0]) & 0xFF, int(value[1]) & 0xFF))
+        raise TypeError("grayscale pixel must be (value, alpha)")
+    if isinstance(value, Color):
+        return bytes((value.r, value.g, value.b, value.a))
+    if isinstance(value, Sequence) and len(value) >= 3:
+        red, green, blue = int(value[0]), int(value[1]), int(value[2])
+        alpha = int(value[3]) if len(value) > 3 else 255
+        return bytes((red, green, blue, alpha))
+    raise TypeError("RGBA pixel must be a Color or (r, g, b, a)")
+
 
 @dataclass(slots=True)
 class Color:
-    """One palette entry."""
+    """One palette entry or RGBA color."""
 
     r: int
     g: int
     b: int
     a: int = 255
     name: str | None = None
+
+    def __iter__(self) -> Iterator[int]:
+        yield self.r
+        yield self.g
+        yield self.b
+        yield self.a
 
 
 @dataclass(slots=True)
@@ -191,8 +260,19 @@ class Palette:
     def __getitem__(self, index: int) -> Color:
         return self.colors[index]
 
+    def __setitem__(self, index: int, color: Color) -> None:
+        self.colors[index] = color
+
     def __iter__(self) -> Iterator[Color]:
         return iter(self.colors)
+
+    def append(self, color: Color) -> None:
+        """Adds a color at the end of the palette."""
+        self.colors.append(color)
+
+    def extend(self, colors: Iterable[Color]) -> None:
+        """Adds colors at the end of the palette."""
+        self.colors.extend(colors)
 
 
 @dataclass(slots=True)
@@ -209,7 +289,7 @@ class Grid:
 class ColorProfile:
     """The color profile for RGB or grayscale values."""
 
-    type: ColorProfileType = ColorProfileType.SRGB
+    kind: ColorProfileType = ColorProfileType.SRGB
     use_fixed_gamma: bool = False
     gamma: int = 0
     icc: bytes = b""
@@ -241,7 +321,7 @@ class UserData:
     """User-defined text, color, and properties on a document object."""
 
     text: str | None = None
-    color: tuple[int, int, int, int] | None = None
+    color: Color | None = None
     properties: list[PropertiesMap] = field(default_factory=list)
 
     def __bool__(self) -> bool:
@@ -258,7 +338,7 @@ class Layer:
 
     name: str
     index: int = 0
-    type: LayerType = LayerType.IMAGE
+    kind: LayerType = LayerType.IMAGE
     child_level: int = 0
     blend_mode: BlendMode = BlendMode.NORMAL
     opacity: int = 255
@@ -298,7 +378,7 @@ class Layer:
         cls,
         name: str,
         flags: int,
-        layer_type: LayerType,
+        kind: LayerType,
         child_level: int,
         blend_mode: BlendMode,
         opacity: int,
@@ -306,7 +386,7 @@ class Layer:
         """Returns a layer decoded from file flag bits."""
         return cls(
             name=name,
-            type=layer_type,
+            kind=kind,
             child_level=child_level,
             blend_mode=blend_mode,
             opacity=opacity,
@@ -381,6 +461,15 @@ class Frame:
             layer: The layer object or layer index.
         """
         return self._cels.get(_layer_index(layer))
+
+    def __getitem__(self, layer: Layer | int) -> Cel:
+        cel = self.cel(layer)
+        if cel is None:
+            raise KeyError(_layer_index(layer))
+        return cel
+
+    def __setitem__(self, layer: Layer | int, pixels: Pixels) -> None:
+        self.set_cel(layer, pixels)
 
     def set_cel(
         self,
@@ -501,71 +590,102 @@ class Tag:
     user_data: UserData | None = None
 
 
-class TagList:
+class _HasName(Protocol):
+    name: str
+
+
+class _NamedList[T: _HasName](MutableSequence[T]):
+    """A mutable sequence that also looks up items by ``name``."""
+
+    def __init__(self, items: Iterable[T] | None = None) -> None:
+        self._items: list[T] = list(items) if items is not None else []
+        self._after_mutate()
+
+    def _after_mutate(self) -> None:
+        return None
+
+    def _name_of(self, item: T) -> str:
+        return item.name
+
+    @overload
+    def __getitem__(self, key: int) -> T: ...
+    @overload
+    def __getitem__(self, key: slice) -> list[T]: ...
+    @overload
+    def __getitem__(self, key: str) -> T: ...
+    def __getitem__(self, key: int | slice | str) -> T | list[T]:
+        if isinstance(key, str):
+            for item in self._items:
+                if self._name_of(item) == key:
+                    return item
+            raise KeyError(key)
+        return self._items[key]
+
+    def __setitem__(self, key: int | slice, value: T | Iterable[T]) -> None:
+        if isinstance(key, slice):
+            self._items[key] = list(cast(Iterable[T], value))
+        else:
+            self._items[key] = cast(T, value)
+        self._after_mutate()
+
+    def __delitem__(self, key: int | slice) -> None:
+        del self._items[key]
+        self._after_mutate()
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def insert(self, index: int, value: T) -> None:
+        self._items.insert(index, value)
+        self._after_mutate()
+
+    def __contains__(self, key: object) -> bool:
+        if isinstance(key, str):
+            return any(self._name_of(item) == key for item in self._items)
+        return any(item == key for item in self._items)
+
+    def get(self, name: str, default: T | None = None) -> T | None:
+        """Returns the first item with this name, or ``default``."""
+        try:
+            return self[name]
+        except KeyError:
+            return default
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, _NamedList):
+            return self._items == other._items
+        return NotImplemented
+
+    def __iter__(self) -> Iterator[T]:
+        return iter(self._items)
+
+
+class TagList(_NamedList[Tag]):
     """A sequence of tags that supports lookup by name or index."""
 
-    def __init__(self, tags: list[Tag] | None = None) -> None:
-        self._tags = list(tags or [])
 
-    def __getitem__(self, key: int | str) -> Tag:
-        if isinstance(key, str):
-            for tag in self._tags:
-                if tag.name == key:
-                    return tag
-            raise KeyError(key)
-        return self._tags[key]
-
-    def __iter__(self) -> Iterator[Tag]:
-        return iter(self._tags)
-
-    def __len__(self) -> int:
-        return len(self._tags)
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, TagList):
-            return self._tags == other._tags
-        return NotImplemented
-
-    def append(self, tag: Tag) -> None:
-        self._tags.append(tag)
-
-    def as_list(self) -> list[Tag]:
-        return self._tags
-
-
-class LayerList:
+class LayerList(_NamedList[Layer]):
     """A sequence of layers that supports lookup by name or index."""
 
-    def __init__(self, layers: list[Layer] | None = None) -> None:
-        self._layers = list(layers or [])
+    def _after_mutate(self) -> None:
+        _reindex_layers(self._items)
 
-    def __getitem__(self, key: int | str) -> Layer:
-        if isinstance(key, str):
-            for layer in self._layers:
-                if layer.name == key:
-                    return layer
-            raise KeyError(key)
-        return self._layers[key]
+    def children(self, group: Layer) -> list[Layer]:
+        """Returns the direct child layers of a group."""
+        level = group.child_level + 1
+        return [
+            layer for layer in self.descendants(group) if layer.child_level == level
+        ]
 
-    def __iter__(self) -> Iterator[Layer]:
-        return iter(self._layers)
+    def descendants(self, group: Layer) -> list[Layer]:
+        """Returns every descendant of a group, in file order."""
+        return list(self._items[group.index + 1 : self._descendants_end(group)])
 
-    def __len__(self) -> int:
-        return len(self._layers)
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, LayerList):
-            return self._layers == other._layers
-        return NotImplemented
-
-    def as_list(self) -> list[Layer]:
-        return self._layers
-
-    def insert(self, index: int, layer: Layer) -> None:
-        self._layers.insert(index, layer)
-
-    def append(self, layer: Layer) -> None:
-        self._layers.append(layer)
+    def _descendants_end(self, group: Layer) -> int:
+        i = group.index + 1
+        while i < len(self._items) and self._items[i].child_level > group.child_level:
+            i += 1
+        return i
 
 
 @dataclass(slots=True)
@@ -611,7 +731,7 @@ class Tileset:
     tile_height: int
     base_index: int = 1
     flags: int = TILESET_FLAG_EMBEDDED | TILESET_FLAG_EMPTY_IS_ZERO
-    pixels: bytes = b""
+    pixels: Pixels | None = None
     compressed: bytes | None = field(default=None, compare=False, repr=False)
     external_file_id: int | None = None
     external_tileset_id: int | None = None
@@ -619,12 +739,20 @@ class Tileset:
     tile_user_data: list[UserData | None] = field(default_factory=list)
 
 
+class SliceList(_NamedList[Slice]):
+    """A sequence of slices that supports lookup by name or index."""
+
+
+class TilesetList(_NamedList[Tileset]):
+    """A sequence of tilesets that supports lookup by name or index."""
+
+
 @dataclass(slots=True)
 class ExternalFile:
     """A file or extension linked from this sprite."""
 
     id: int
-    type: ExternalFileType
+    kind: ExternalFileType
     name: str
 
 
@@ -656,23 +784,3 @@ def _layer_index(layer: Layer | int) -> int:
 def _reindex_layers(layers: Sequence[Layer]) -> None:
     for index, layer in enumerate(layers):
         layer.index = index
-
-
-def children_of(layers: Sequence[Layer], group: Layer) -> list[Layer]:
-    """Returns the direct child layers of a group."""
-    start = group.index + 1
-    out: list[Layer] = []
-    i = start
-    while i < len(layers) and layers[i].child_level > group.child_level:
-        if layers[i].child_level == group.child_level + 1:
-            out.append(layers[i])
-        i += 1
-    return out
-
-
-def descendants_end(layers: Sequence[Layer], group: Layer) -> int:
-    """Returns the index after the last descendant of a group."""
-    i = group.index + 1
-    while i < len(layers) and layers[i].child_level > group.child_level:
-        i += 1
-    return i

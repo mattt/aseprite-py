@@ -6,7 +6,7 @@ from uuid import UUID
 
 from aseprite._binary import Reader, Writer
 from aseprite._errors import FormatError
-from aseprite._model import PropertiesMap, PropertyType, UserData, UserProperty
+from aseprite._model import Color, PropertiesMap, PropertyType, UserData, UserProperty
 
 _MAX_DEPTH = 128
 
@@ -14,12 +14,12 @@ _MAX_DEPTH = 128
 def read_user_data(r: Reader) -> UserData:
     flags = r.u32()
     text: str | None = None
-    color: tuple[int, int, int, int] | None = None
+    color: Color | None = None
     properties: list[PropertiesMap] = []
     if flags & 1:
         text = r.string()
     if flags & 2:
-        color = (r.u8(), r.u8(), r.u8(), r.u8())
+        color = Color(r.u8(), r.u8(), r.u8(), r.u8())
     if flags & 4:
         start = r.pos
         size = r.u32()
@@ -49,11 +49,10 @@ def write_user_data(w: Writer, data: UserData) -> None:
     if data.text is not None:
         w.string(data.text)
     if data.color is not None:
-        r, g, b, a = data.color
-        w.u8(r)
-        w.u8(g)
-        w.u8(b)
-        w.u8(a)
+        w.u8(data.color.r)
+        w.u8(data.color.g)
+        w.u8(data.color.b)
+        w.u8(data.color.a)
     if data.properties:
         size_at = w.tell()
         w.u32(0)
@@ -139,13 +138,13 @@ def _as_int(value: object) -> int:
         return int(value)
     if isinstance(value, int):
         return value
-    raise FormatError("property value must be an integer")
+    raise ValueError("property value must be an integer")
 
 
 def _as_float(value: object) -> float:
     if isinstance(value, int | float):
         return float(value)
-    raise FormatError("property value must be a float")
+    raise ValueError("property value must be a float")
 
 
 def _as_pair(value: object) -> tuple[int, int]:
@@ -155,7 +154,7 @@ def _as_pair(value: object) -> tuple[int, int]:
         and all(isinstance(item, int) for item in value)
     ):
         return int(value[0]), int(value[1])
-    raise FormatError("property value must be a pair of integers")
+    raise ValueError("property value must be a pair of integers")
 
 
 def _as_rect(value: object) -> tuple[int, int, int, int]:
@@ -165,12 +164,12 @@ def _as_rect(value: object) -> tuple[int, int, int, int]:
         and all(isinstance(item, int) for item in value)
     ):
         return int(value[0]), int(value[1]), int(value[2]), int(value[3])
-    raise FormatError("property value must be a rectangle of integers")
+    raise ValueError("property value must be a rectangle of integers")
 
 
 def _write_value(w: Writer, kind: PropertyType, value: object, depth: int) -> None:
     if depth > _MAX_DEPTH:
-        raise FormatError("user-data property nesting exceeds 128 levels")
+        raise ValueError("user-data property nesting exceeds 128 levels")
     if kind is PropertyType.BOOL:
         w.u8(1 if value else 0)
     elif kind is PropertyType.INT8:
@@ -213,16 +212,16 @@ def _write_value(w: Writer, kind: PropertyType, value: object, depth: int) -> No
         w.i32(height)
     elif kind is PropertyType.VECTOR:
         if not isinstance(value, tuple) or len(value) != 2:
-            raise FormatError("vector property must be (element_type, items)")
+            raise ValueError("vector property must be (element_type, items)")
         element, items = value
         if not isinstance(items, list):
-            raise FormatError("vector items must be a list")
+            raise ValueError("vector items must be a list")
         w.u32(len(items))
         w.u16(_as_int(element))
         if _as_int(element) == 0:
             for item in items:
                 if not isinstance(item, tuple) or len(item) != 2:
-                    raise FormatError("mixed vector items must be (type, value)")
+                    raise ValueError("mixed vector items must be (type, value)")
                 item_kind, item_value = item
                 w.u16(_as_int(item_kind))
                 _write_value(w, PropertyType(_as_int(item_kind)), item_value, depth + 1)
@@ -232,11 +231,11 @@ def _write_value(w: Writer, kind: PropertyType, value: object, depth: int) -> No
                 _write_value(w, item_kind, item, depth + 1)
     elif kind is PropertyType.PROPERTIES:
         if not isinstance(value, list):
-            raise FormatError("nested properties must be a list")
+            raise ValueError("nested properties must be a list")
         w.u32(len(value))
         for prop in value:
             if not isinstance(prop, UserProperty):
-                raise FormatError("nested properties must be UserProperty values")
+                raise ValueError("nested properties must be UserProperty values")
             _write_property(w, prop, depth + 1)
     elif kind is PropertyType.UUID:
         if isinstance(value, UUID):
@@ -244,6 +243,6 @@ def _write_value(w: Writer, kind: PropertyType, value: object, depth: int) -> No
         elif isinstance(value, bytes):
             w.uuid(value)
         else:
-            raise FormatError("UUID property must be a UUID or 16 bytes")
+            raise ValueError("UUID property must be a UUID or 16 bytes")
     else:
-        raise FormatError(f"unsupported property type {int(kind):#06x}")
+        raise ValueError(f"unsupported property type {int(kind):#06x}")

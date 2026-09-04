@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import zlib
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from aseprite._binary import (
@@ -16,6 +17,8 @@ from aseprite._binary import (
 from aseprite._errors import FormatError
 from aseprite._limits import MAX_PALETTE_COLORS, MAX_UNCOMPRESSED_BYTES, bytes_per_tile
 from aseprite._model import (
+    HEADER_FLAG_GROUP_BLEND,
+    HEADER_FLAG_LAYER_OPACITY,
     HEADER_FLAG_LAYER_UUID,
     BlendMode,
     Cel,
@@ -44,6 +47,9 @@ from aseprite._model import (
 )
 from aseprite._userdata import read_user_data
 
+if TYPE_CHECKING:
+    from aseprite._sprite import Sprite
+
 CHUNK_OLD_PALETTE_4 = 0x0004
 CHUNK_OLD_PALETTE_11 = 0x0011
 CHUNK_LAYER = 0x2004
@@ -60,7 +66,7 @@ CHUNK_SLICE = 0x2022
 CHUNK_TILESET = 0x2023
 
 
-def read_sprite(data: bytes) -> object:
+def read_sprite(data: bytes) -> Sprite:
     """Parses bytes and returns a ``Sprite``.
 
     Imported lazily from ``_sprite`` to avoid a cycle.
@@ -96,8 +102,9 @@ def read_sprite(data: bytes) -> object:
     grid_w = header.u16()
     grid_h = header.u16()
 
-    sprite = Sprite(width, height, color_mode)
-    sprite.flags = flags
+    sprite = Sprite(width, height, color_mode, empty=True)
+    sprite.valid_layer_opacity = bool(flags & HEADER_FLAG_LAYER_OPACITY)
+    sprite.group_blend = bool(flags & HEADER_FLAG_GROUP_BLEND)
     sprite.deprecated_speed = speed
     sprite.transparent_index = transparent_index
     sprite.num_colors = num_colors or 256
@@ -326,15 +333,15 @@ def _read_palette(r: Reader) -> Palette:
 
 def _read_layer(r: Reader, has_uuid: bool) -> Layer:
     flags = r.u16()
-    layer_type = _enum(LayerType, r.u16(), LayerType.IMAGE)
+    kind = _enum(LayerType, r.u16(), LayerType.IMAGE)
     child_level = r.u16()
     r.skip(4)
     blend = _enum(BlendMode, r.u16(), BlendMode.NORMAL)
     opacity = r.u8()
     r.skip(3)
     name = r.string()
-    layer = Layer.from_flags(name, flags, layer_type, child_level, blend, opacity)
-    if layer_type is LayerType.TILEMAP:
+    layer = Layer.from_flags(name, flags, kind, child_level, blend, opacity)
+    if kind is LayerType.TILEMAP:
         layer.tileset_index = r.u32()
     if has_uuid and r.remaining() >= 16:
         layer.uuid = UUID(bytes=r.uuid())
@@ -430,7 +437,7 @@ def _read_color_profile(r: Reader) -> ColorProfile:
         length = r.u32()
         icc = r.raw(length)
     return ColorProfile(
-        type=ptype,
+        kind=ptype,
         use_fixed_gamma=bool(flags & 1),
         gamma=gamma,
         icc=icc,
@@ -446,7 +453,7 @@ def _read_external_files(r: Reader) -> list[ExternalFile]:
         ftype = _enum(ExternalFileType, r.u8(), ExternalFileType.PALETTE)
         r.skip(7)
         name = r.string()
-        files.append(ExternalFile(id=entry_id, type=ftype, name=name))
+        files.append(ExternalFile(id=entry_id, kind=ftype, name=name))
     return files
 
 
@@ -531,7 +538,7 @@ def _read_tileset(r: Reader, color_mode: ColorMode) -> Tileset:
     name = r.string()
     external_file_id = None
     external_tileset_id = None
-    pixels = b""
+    pixels = None
     compressed = None
     if flags & 1:
         external_file_id = r.u32()
@@ -540,9 +547,13 @@ def _read_tileset(r: Reader, color_mode: ColorMode) -> Tileset:
         length = r.u32()
         compressed = r.raw(length)
         expected = tile_width * tile_height * tile_count * color_mode.bytes_per_pixel
-        pixels = _decompress(compressed, expected)
-        if len(pixels) != expected:
+        raw = _decompress(compressed, expected)
+        if len(raw) != expected:
             raise FormatError("tileset image size does not match tile dimensions")
+        image_height = tile_height * tile_count
+        pixels = Pixels(
+            tile_width, image_height, raw, color_mode, compressed=compressed
+        )
     return Tileset(
         id=tileset_id,
         name=name,

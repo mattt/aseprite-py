@@ -58,9 +58,10 @@ def test_semantic_roundtrip() -> None:
 
 def test_grayscale_and_indexed() -> None:
     gray = Sprite(2, 1, ColorMode.GRAYSCALE)
-    layer = gray.add_layer("g")
-    gray.add_frame(50).set_cel(
-        layer, Pixels(2, 1, b"\x10\xff\x20\x80", ColorMode.GRAYSCALE)
+    gray.layers[0].name = "g"
+    gray.frames[0].duration_ms = 50
+    gray.frames[0].set_cel(
+        gray.layers[0], Pixels(2, 1, b"\x10\xff\x20\x80", ColorMode.GRAYSCALE)
     )
     loaded = Sprite.from_bytes(gray.to_bytes())
     assert loaded.color_mode is ColorMode.GRAYSCALE
@@ -71,8 +72,10 @@ def test_grayscale_and_indexed() -> None:
     indexed = Sprite(2, 1, ColorMode.INDEXED)
     indexed.palette = Palette([Color(1, 2, 3), Color(4, 5, 6, 200, name="x")])
     indexed.transparent_index = 0
-    layer = indexed.add_layer("i")
-    indexed.add_frame(100).set_cel(layer, Pixels(2, 1, b"\x00\x01", ColorMode.INDEXED))
+    indexed.layers[0].name = "i"
+    indexed.frames[0].set_cel(
+        indexed.layers[0], Pixels(2, 1, b"\x00\x01", ColorMode.INDEXED)
+    )
     loaded = Sprite.from_bytes(indexed.to_bytes())
     assert loaded.color_mode is ColorMode.INDEXED
     assert loaded.palette[1].name == "x"
@@ -92,7 +95,7 @@ def test_cel_extra() -> None:
 
 
 def test_linked_cel() -> None:
-    sprite = Sprite(1, 1, ColorMode.RGBA)
+    sprite = Sprite(1, 1, ColorMode.RGBA, empty=True)
     layer = sprite.add_layer("L")
     first = sprite.add_frame(100)
     first.set_cel(layer, Pixels(1, 1, b"\x01\x02\x03\xff", ColorMode.RGBA))
@@ -105,8 +108,8 @@ def test_linked_cel() -> None:
 
 
 def test_group_layers() -> None:
-    sprite = Sprite(1, 1, ColorMode.RGBA)
-    group = sprite.add_layer("group", layer_type=LayerType.GROUP)
+    sprite = Sprite(1, 1, ColorMode.RGBA, empty=True)
+    group = sprite.add_layer("group", kind=LayerType.GROUP)
     child = sprite.add_layer("child", parent=group)
     sprite.add_layer("other")
     sprite.add_frame(100)
@@ -117,7 +120,7 @@ def test_group_layers() -> None:
     loaded = Sprite.from_bytes(sprite.to_bytes())
     assert [ly.name for ly in loaded.layers] == ["group", "child", "other"]
     assert loaded.layers[1].child_level == 1
-    assert loaded.layers[0].type is LayerType.GROUP
+    assert loaded.layers[0].kind is LayerType.GROUP
 
 
 def test_slice_nine_patch_and_pivot() -> None:
@@ -145,17 +148,17 @@ def test_slice_nine_patch_and_pivot() -> None:
 
 
 def test_tileset_and_tilemap() -> None:
-    sprite = Sprite(8, 8, ColorMode.RGBA)
+    sprite = Sprite(8, 8, ColorMode.RGBA, empty=True)
     tileset = Tileset(
         id=0,
         name="tiles",
         tile_count=1,
         tile_width=8,
         tile_height=8,
-        pixels=b"\xff\x00\x00\xff" * 64,
+        pixels=Pixels(8, 8, b"\xff\x00\x00\xff" * 64, ColorMode.RGBA),
     )
     sprite.tilesets.append(tileset)
-    layer = sprite.add_layer("map", layer_type=LayerType.TILEMAP, tileset_index=0)
+    layer = sprite.add_layer("map", kind=LayerType.TILEMAP, tileset_index=0)
     tiles = (1).to_bytes(4, "little")
     sprite.add_frame(100).set_tilemap_cel(
         layer,
@@ -172,7 +175,7 @@ def test_tileset_and_tilemap() -> None:
     )
     loaded = Sprite.from_bytes(sprite.to_bytes())
     assert loaded.tilesets[0].name == "tiles"
-    assert loaded.layers[0].type is LayerType.TILEMAP
+    assert loaded.layers[0].kind is LayerType.TILEMAP
     cel = loaded.frames[0].cel(0)
     assert cel is not None
     assert cel.tilemap is not None
@@ -206,14 +209,14 @@ def test_user_data_property_types() -> None:
     sprite = rgba_sprite()
     sprite.layers[0].user_data = UserData(
         text="note",
-        color=(1, 2, 3, 4),
+        color=Color(1, 2, 3, 4),
         properties=[PropertiesMap(0, props)],
     )
     loaded = Sprite.from_bytes(sprite.to_bytes())
     data = loaded.layers[0].user_data
     assert data is not None
     assert data.text == "note"
-    assert data.color == (1, 2, 3, 4)
+    assert data.color == Color(1, 2, 3, 4)
     values = {p.name: p.value for p in data.properties[0].properties}
     assert values["b"] is True
     assert values["i8"] == -2
@@ -236,7 +239,7 @@ def test_mask_and_external_file() -> None:
 def test_color_profile_icc() -> None:
     sprite = rgba_sprite()
     sprite.color_profile = ColorProfile(
-        type=ColorProfileType.ICC,
+        kind=ColorProfileType.ICC,
         icc=b"icc-bytes",
     )
     loaded = Sprite.from_bytes(sprite.to_bytes())
@@ -245,7 +248,7 @@ def test_color_profile_icc() -> None:
 
 
 def test_layer_flags_and_blend() -> None:
-    sprite = Sprite(1, 1, ColorMode.RGBA)
+    sprite = Sprite(1, 1, ColorMode.RGBA, empty=True)
     layer = sprite.add_layer("L", blend_mode=BlendMode.MULTIPLY, opacity=128)
     layer.visible = False
     layer.background = True

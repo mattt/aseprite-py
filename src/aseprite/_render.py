@@ -5,17 +5,14 @@ from __future__ import annotations
 import struct
 from typing import TYPE_CHECKING
 
-from aseprite._errors import AsepriteError
 from aseprite._limits import MAX_PIXELS, bytes_per_tile
 from aseprite._model import (
-    HEADER_FLAG_GROUP_BLEND,
     BlendMode,
     Cel,
     ColorMode,
     Layer,
     LayerType,
     Pixels,
-    children_of,
 )
 
 if TYPE_CHECKING:
@@ -25,11 +22,11 @@ if TYPE_CHECKING:
 def flatten_frame(sprite: Sprite, frame_index: int) -> bytes:
     """Returns RGBA8 bytes for one composited frame."""
     if frame_index < 0 or frame_index >= len(sprite.frames):
-        raise AsepriteError(f"frame {frame_index} is out of range")
+        raise IndexError(f"frame {frame_index} is out of range")
     if sprite.width * sprite.height > MAX_PIXELS:
-        raise AsepriteError(f"canvas exceeds {MAX_PIXELS} pixels")
+        raise ValueError(f"canvas exceeds {MAX_PIXELS} pixels")
     dest = bytearray(sprite.width * sprite.height * 4)
-    isolate_groups = bool(sprite.flags & HEADER_FLAG_GROUP_BLEND)
+    isolate_groups = sprite.group_blend
     _composite_layers(
         sprite,
         frame_index,
@@ -51,13 +48,13 @@ def _composite_layers(
     for layer in layers:
         if not layer.visible:
             continue
-        if layer.type is LayerType.GROUP:
+        if layer.kind is LayerType.GROUP:
             if isolate_groups:
                 child_buf = bytearray(sprite.width * sprite.height * 4)
                 _composite_layers(
                     sprite,
                     frame_index,
-                    children_of(sprite.layers.as_list(), layer),
+                    sprite.layers.children(layer),
                     child_buf,
                     isolate_groups,
                 )
@@ -66,7 +63,7 @@ def _composite_layers(
                 _composite_layers(
                     sprite,
                     frame_index,
-                    children_of(sprite.layers.as_list(), layer),
+                    sprite.layers.children(layer),
                     dest,
                     isolate_groups,
                 )
@@ -117,10 +114,11 @@ def _tiles_to_pixels(sprite: Sprite, layer: Layer, cel: Cel) -> Pixels | None:
     out_w = tm.width * tw
     out_h = tm.height * th
     if out_w < 0 or out_h < 0 or out_w * out_h > MAX_PIXELS:
-        raise AsepriteError(f"tilemap exceeds {MAX_PIXELS} pixels")
+        raise ValueError(f"tilemap exceeds {MAX_PIXELS} pixels")
     out = bytearray(out_w * out_h * bpp)
     tile_bytes = tw * th * bpp
     stride = bytes_per_tile(tm.bits_per_tile)
+    pixel_data = tileset.pixels.data if tileset.pixels is not None else b""
     for ty in range(tm.height):
         for tx in range(tm.width):
             offset = (ty * tm.width + tx) * stride
@@ -136,9 +134,9 @@ def _tiles_to_pixels(sprite: Sprite, layer: Layer, cel: Cel) -> Pixels | None:
             if tileset.flags & 4 and tile_id == 0:
                 continue
             src = tile_id * tile_bytes
-            if src + tile_bytes > len(tileset.pixels):
+            if src + tile_bytes > len(pixel_data):
                 continue
-            tile = tileset.pixels[src : src + tile_bytes]
+            tile = pixel_data[src : src + tile_bytes]
             x_flip = bool(value & tm.x_flip_mask)
             y_flip = bool(value & tm.y_flip_mask)
             d_flip = bool(value & tm.d_flip_mask)

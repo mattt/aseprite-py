@@ -1,7 +1,6 @@
 import pytest
 
 from aseprite import (
-    AsepriteError,
     Color,
     ColorMode,
     LayerType,
@@ -30,7 +29,7 @@ def test_flatten_hidden_layer_skipped() -> None:
 
 
 def test_flatten_linked_cel() -> None:
-    sprite = Sprite(1, 1, ColorMode.RGBA)
+    sprite = Sprite(1, 1, ColorMode.RGBA, empty=True)
     layer = sprite.add_layer("L")
     sprite.add_frame(100).set_cel(
         layer, Pixels(1, 1, b"\x01\x02\x03\xff", ColorMode.RGBA)
@@ -43,8 +42,9 @@ def test_flatten_indexed_transparent() -> None:
     sprite = Sprite(2, 1, ColorMode.INDEXED)
     sprite.palette = Palette([Color(255, 0, 0), Color(0, 255, 0)])
     sprite.transparent_index = 0
-    layer = sprite.add_layer("L")
-    sprite.add_frame(100).set_cel(layer, Pixels(2, 1, b"\x00\x01", ColorMode.INDEXED))
+    sprite.frames[0].set_cel(
+        sprite.layers[0], Pixels(2, 1, b"\x00\x01", ColorMode.INDEXED)
+    )
     data = sprite.flatten(0)
     assert data[0:4] == b"\x00\x00\x00\x00"
     assert data[4:8] == b"\x00\xff\x00\xff"
@@ -52,9 +52,11 @@ def test_flatten_indexed_transparent() -> None:
 
 def test_flatten_opacity() -> None:
     sprite = Sprite(1, 1, ColorMode.RGBA)
-    layer = sprite.add_layer("L", opacity=128)
-    sprite.add_frame(100).set_cel(
-        layer, Pixels(1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA), opacity=128
+    sprite.layers[0].opacity = 128
+    sprite.frames[0].set_cel(
+        sprite.layers[0],
+        Pixels(1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA),
+        opacity=128,
     )
     data = sprite.flatten(0)
     assert data[3] < 255
@@ -70,19 +72,17 @@ def test_image_extra() -> None:
 
 def test_flatten_rejects_huge_canvas() -> None:
     sprite = Sprite(8193, 8193)
-    sprite.add_layer("L")
-    sprite.add_frame(100)
-    with pytest.raises(AsepriteError, match="canvas exceeds"):
+    with pytest.raises(ValueError, match="canvas exceeds"):
         sprite.flatten(0)
     assert 8193 * 8193 > MAX_PIXELS
 
 
 def test_flatten_rejects_huge_tilemap() -> None:
-    sprite = Sprite(8, 8)
+    sprite = Sprite(8, 8, empty=True)
     sprite.tilesets.append(
         Tileset(id=0, name="t", tile_count=1, tile_width=256, tile_height=256)
     )
-    layer = sprite.add_layer("map", layer_type=LayerType.TILEMAP, tileset_index=0)
+    layer = sprite.add_layer("map", kind=LayerType.TILEMAP, tileset_index=0)
     sprite.add_frame(100).set_tilemap_cel(
         layer,
         Tilemap(
@@ -96,5 +96,5 @@ def test_flatten_rejects_huge_tilemap() -> None:
             tiles=b"",
         ),
     )
-    with pytest.raises(AsepriteError, match="tilemap exceeds"):
+    with pytest.raises(ValueError, match="tilemap exceeds"):
         sprite.flatten(0)

@@ -12,7 +12,6 @@ from aseprite._binary import (
     HEADER_SIZE,
     Writer,
 )
-from aseprite._errors import AsepriteError
 from aseprite._model import (
     HEADER_FLAG_LAYER_OPACITY,
     HEADER_FLAG_LAYER_UUID,
@@ -47,7 +46,7 @@ CHUNK_TILESET = 0x2023
 def write_sprite(sprite: Sprite) -> bytes:
     """Returns the Aseprite file bytes for ``sprite``."""
     if not sprite.frames:
-        raise AsepriteError("a sprite must have at least one frame")
+        raise ValueError("a sprite must have at least one frame")
 
     w = Writer()
     _write_header(w, sprite, file_size=0)
@@ -176,14 +175,12 @@ def write_sprite(sprite: Sprite) -> bytes:
 
     w.patch_u32(0, w.tell())
     if w.tell() < HEADER_SIZE + FRAME_HEADER_SIZE:
-        raise AsepriteError("written file is truncated")
+        raise ValueError("written file is truncated")
     return bytes(w.buf)
 
 
 def _write_header(w: Writer, sprite: Sprite, file_size: int) -> None:
-    flags = sprite.flags | HEADER_FLAG_LAYER_OPACITY
-    if any(layer.uuid is not None for layer in sprite.layers):
-        flags |= HEADER_FLAG_LAYER_UUID
+    flags = sprite.flags | int(HEADER_FLAG_LAYER_OPACITY)
     w.u32(file_size)
     w.u16(FILE_MAGIC)
     w.u16(len(sprite.frames))
@@ -249,7 +246,7 @@ def _write_palette(w: Writer, palette: Palette) -> None:
 
 def _write_layer(w: Writer, layer, sprite: Sprite) -> None:  # noqa: ANN001
     w.u16(layer.flags)
-    w.u16(int(layer.type))
+    w.u16(int(layer.kind))
     w.u16(layer.child_level)
     w.u16(0)
     w.u16(0)
@@ -257,7 +254,7 @@ def _write_layer(w: Writer, layer, sprite: Sprite) -> None:  # noqa: ANN001
     w.u8(layer.opacity)
     w.pad(3)
     w.string(layer.name)
-    if layer.type is LayerType.TILEMAP:
+    if layer.kind is LayerType.TILEMAP:
         w.u32(layer.tileset_index or 0)
     if layer.uuid is not None:
         w.uuid(layer.uuid.bytes)
@@ -303,7 +300,7 @@ def _write_cel(w: Writer, cel) -> None:  # noqa: ANN001
         return
     pixels: Pixels | None = cel.pixels
     if pixels is None:
-        raise AsepriteError("cel has no pixel data")
+        raise ValueError("cel has no pixel data")
     if cel.raw:
         w.u16(0)
         w.i16(cel.z_index)
@@ -333,12 +330,12 @@ def _write_cel_extra(w: Writer, cel) -> None:  # noqa: ANN001
 def _write_color_profile(w: Writer, sprite: Sprite) -> None:
     profile = sprite.color_profile
     if profile is None:
-        raise AsepriteError("color profile is missing")
-    w.u16(int(profile.type))
+        raise ValueError("color profile is missing")
+    w.u16(int(profile.kind))
     w.u16(1 if profile.use_fixed_gamma else 0)
     w.u32(profile.gamma)
     w.pad(8)
-    if profile.type is ColorProfileType.ICC:
+    if profile.kind is ColorProfileType.ICC:
         w.u32(len(profile.icc))
         w.raw(profile.icc)
 
@@ -348,7 +345,7 @@ def _write_external_files(w: Writer, sprite: Sprite) -> None:
     w.pad(8)
     for entry in sprite.external_files:
         w.u32(entry.id)
-        w.u8(int(entry.type))
+        w.u8(int(entry.kind))
         w.pad(7)
         w.string(entry.name)
 
@@ -426,6 +423,7 @@ def _write_tileset(w: Writer, tileset, color_mode: ColorMode) -> None:  # noqa: 
         w.u32(tileset.external_file_id or 0)
         w.u32(tileset.external_tileset_id or 0)
     if tileset.flags & TILESET_FLAG_EMBEDDED:
-        compressed = _compress(tileset.pixels, tileset.compressed)
+        pixel_data = tileset.pixels.data if tileset.pixels is not None else b""
+        compressed = _compress(pixel_data, tileset.compressed)
         w.u32(len(compressed))
         w.raw(compressed)
