@@ -1,4 +1,5 @@
 from io import BytesIO
+from typing import Any
 
 import pytest
 
@@ -13,6 +14,7 @@ from aseprite import (
     Pixels,
     SliceKey,
     Sprite,
+    UserData,
     __version__,
 )
 
@@ -204,3 +206,90 @@ def test_add_slice_nine_patch() -> None:
     )
     loaded = Sprite.from_bytes(sprite.to_bytes())
     assert loaded.slices["box"].keys[0].nine_patch == NinePatch(1, 1, 2, 2)
+
+
+def test_grayscale_pixel_access() -> None:
+    pixels = Pixels.blank(1, 1, ColorMode.GRAYSCALE)
+    pixels[0, 0] = (16, 255)
+    assert pixels[0, 0] == Color(16, 16, 16, 255)
+    pixels[0, 0] = Color(8, 0, 0, 128)
+    assert pixels[0, 0] == Color(8, 8, 8, 128)
+
+
+def test_pixels_type_errors() -> None:
+    pixels = Pixels.blank(1, 1, ColorMode.RGBA)
+    bad_key: Any = 0
+    with pytest.raises(TypeError, match="pixel index"):
+        pixels[bad_key]
+    with pytest.raises(TypeError, match="RGBA pixel"):
+        pixels[0, 0] = 3
+    gray = Pixels.blank(1, 1, ColorMode.GRAYSCALE)
+    with pytest.raises(TypeError, match="grayscale"):
+        gray[0, 0] = 3
+    indexed = Pixels.blank(1, 1, ColorMode.INDEXED)
+    bad_value: Any = None
+    with pytest.raises(TypeError, match="indexed"):
+        indexed[0, 0] = bad_value
+
+
+def test_pixels_buffer() -> None:
+    pixels = Pixels.blank(1, 1, ColorMode.RGBA)
+    view = memoryview(pixels)
+    assert bytes(view) == bytes(pixels.data)
+
+
+def test_pixels_setitem_mutates_in_place() -> None:
+    pixels = Pixels.blank(2, 1, ColorMode.RGBA)
+    pixels[0, 0] = (1, 2, 3, 4)
+    buf = pixels.data
+    assert isinstance(buf, bytearray)
+    pixels[1, 0] = (5, 6, 7, 8)
+    assert pixels.data is buf
+
+
+def test_pixels_validation() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        Pixels(-1, 1, b"", ColorMode.RGBA)
+    with pytest.raises(ValueError, match="does not match"):
+        Pixels(1, 1, b"\x00", ColorMode.RGBA)
+
+
+def test_blank_pixels_custom_size() -> None:
+    sprite = Sprite(4, 4)
+    pixels = sprite.blank_pixels(3, 2)
+    assert pixels.width == 3
+    assert pixels.height == 2
+    assert pixels.color_mode is ColorMode.RGBA
+
+
+def test_replace_layer_drops_cel() -> None:
+    sprite = Sprite(1, 1)
+    sprite.frames[0][sprite.layers[0]] = Pixels(
+        1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA
+    )
+    sprite.layers[0] = Layer("new")
+    assert sprite.frames[0].cel(0) is None
+
+
+def test_color_mode_bytes_per_pixel() -> None:
+    assert ColorMode.RGBA.bytes_per_pixel == 4
+    assert ColorMode.GRAYSCALE.bytes_per_pixel == 2
+    assert ColorMode.INDEXED.bytes_per_pixel == 1
+
+
+def test_user_data_bool() -> None:
+    assert not UserData()
+    assert UserData(text="")
+    assert UserData(color=Color(0, 0, 0))
+
+
+def test_named_list_missing_name() -> None:
+    sprite = Sprite(1, 1)
+    with pytest.raises(KeyError, match="missing"):
+        sprite.layers["missing"]
+
+
+def test_frame_missing_cel() -> None:
+    sprite = Sprite(1, 1)
+    with pytest.raises(KeyError):
+        sprite.frames[0][99]
