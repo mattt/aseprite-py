@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 from aseprite import ColorMode, LayerType, Pixels, Sprite, Tilemap, Tileset
 from aseprite._binary import FILE_MAGIC, FRAME_MAGIC, HEADER_SIZE, Reader, Writer
 from aseprite._model import TILESET_FLAG_EMBEDDED, TILESET_FLAG_EMPTY_IS_ZERO
@@ -171,3 +174,17 @@ def chunk_types(data: bytes) -> list[int]:
         types.append(r.u16())
         r.skip(size - 6)
     return types
+
+
+def aseprite_cli() -> Path | None:
+    """Returns the Aseprite executable, if one is available.
+
+    Uses ``ASEPRITE_PATH`` when that file exists.
+    Otherwise looks in ``/Applications/Aseprite.app``.
+    """
+    env = os.environ.get("ASEPRITE_PATH")
+    if env:
+        path = Path(env)
+        return path if path.is_file() else None
+    mac = Path("/Applications/Aseprite.app/Contents/MacOS/aseprite")
+    return mac if mac.is_file() else None

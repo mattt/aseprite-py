@@ -289,7 +289,11 @@ uv run ty check
 uv run pytest
 ```
 
+
 The default test suite does not need the Aseprite application.
+If the editor is present, one test compares `flatten()` to a CLI PNG export.
+On macOS the suite looks in `/Applications/Aseprite.app`.
+Set `ASEPRITE_PATH` to use another binary.
 
 ## License
 
