@@ -273,7 +273,7 @@ python -m aseprite export hero.aseprite hero.png --frame 0
 
 These caps bound memory use when you open or flatten a file.
 
-- A palette may have at most 65,536 colors.
+- A palette may have at most 65,535 colors.
 - Uncompressed cel and tileset pixels in one document may total at most 256 MiB.
 - `flatten()`, `image()`, and `python -m aseprite export` accept at most 67,108,864 pixels (8192×8192).
 
