@@ -1,7 +1,13 @@
 import pytest
 
 from aseprite import FormatError, Sprite
-from aseprite._binary import FILE_MAGIC, FRAME_MAGIC, HEADER_SIZE
+from aseprite._binary import (
+    CHUNK_HEADER_SIZE,
+    FILE_MAGIC,
+    FRAME_HEADER_SIZE,
+    FRAME_MAGIC,
+    HEADER_SIZE,
+)
 
 
 def _header(
@@ -58,6 +64,19 @@ def test_bad_depth() -> None:
 def test_truncated_frame() -> None:
     with pytest.raises(FormatError):
         Sprite.from_bytes(bytes(_header()))
+
+
+def test_chunk_exceeds_frame() -> None:
+    header = _header(frames=2)
+    frame0 = bytearray(FRAME_HEADER_SIZE + CHUNK_HEADER_SIZE)
+    frame0[0:4] = (FRAME_HEADER_SIZE + CHUNK_HEADER_SIZE).to_bytes(4, "little")
+    frame0[4:6] = FRAME_MAGIC.to_bytes(2, "little")
+    frame0[6:8] = (1).to_bytes(2, "little")
+    frame0[8:10] = (100).to_bytes(2, "little")
+    frame0[16:20] = (FRAME_HEADER_SIZE + CHUNK_HEADER_SIZE + 8).to_bytes(4, "little")
+    frame0[20:22] = (0x0000).to_bytes(2, "little")
+    with pytest.raises(FormatError, match="chunk exceeds frame"):
+        Sprite.from_bytes(bytes(header) + bytes(frame0) + _frame())
 
 
 def test_invalid_zlib() -> None:

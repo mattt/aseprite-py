@@ -135,13 +135,18 @@ def read_sprite(data: bytes) -> object:
         chunk_pos = pos + FRAME_HEADER_SIZE
         frame_end = pos + frame_size
         for _ in range(nchunks):
-            if chunk_pos + CHUNK_HEADER_SIZE > len(data):
+            if (
+                chunk_pos + CHUNK_HEADER_SIZE > frame_end
+                or chunk_pos + CHUNK_HEADER_SIZE > len(data)
+            ):
                 raise FormatError("truncated chunk header")
             cr = Reader(data, chunk_pos, chunk_pos + CHUNK_HEADER_SIZE)
             chunk_size = cr.u32()
             chunk_type = cr.u16()
             if chunk_size < CHUNK_HEADER_SIZE:
                 raise FormatError("chunk size is smaller than 6 bytes")
+            if chunk_pos + chunk_size > frame_end:
+                raise FormatError("chunk exceeds frame")
             payload = Reader(
                 data, chunk_pos + CHUNK_HEADER_SIZE, chunk_pos + chunk_size
             )
