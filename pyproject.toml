@@ -43,7 +43,7 @@ dev = [
 ]
 
 [tool.ruff]
-src = ["src", "tests"]
+src = ["src", "tests", "examples"]
 target-version = "py312"
 line-length = 88
 
