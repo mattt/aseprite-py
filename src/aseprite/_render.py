@@ -6,6 +6,7 @@ import struct
 from typing import TYPE_CHECKING
 
 from aseprite._errors import AsepriteError
+from aseprite._limits import MAX_PIXELS, bytes_per_tile
 from aseprite._model import (
     HEADER_FLAG_GROUP_BLEND,
     BlendMode,
@@ -25,6 +26,8 @@ def flatten_frame(sprite: Sprite, frame_index: int) -> bytes:
     """Returns RGBA8 bytes for one composited frame."""
     if frame_index < 0 or frame_index >= len(sprite.frames):
         raise AsepriteError(f"frame {frame_index} is out of range")
+    if sprite.width * sprite.height > MAX_PIXELS:
+        raise AsepriteError(f"canvas exceeds {MAX_PIXELS} pixels")
     dest = bytearray(sprite.width * sprite.height * 4)
     isolate_groups = bool(sprite.flags & HEADER_FLAG_GROUP_BLEND)
     _composite_layers(
@@ -113,9 +116,11 @@ def _tiles_to_pixels(sprite: Sprite, layer: Layer, cel: Cel) -> Pixels | None:
     tw, th = tileset.tile_width, tileset.tile_height
     out_w = tm.width * tw
     out_h = tm.height * th
+    if out_w < 0 or out_h < 0 or out_w * out_h > MAX_PIXELS:
+        raise AsepriteError(f"tilemap exceeds {MAX_PIXELS} pixels")
     out = bytearray(out_w * out_h * bpp)
     tile_bytes = tw * th * bpp
-    stride = 4 if tm.bits_per_tile == 32 else (2 if tm.bits_per_tile == 16 else 1)
+    stride = bytes_per_tile(tm.bits_per_tile)
     for ty in range(tm.height):
         for tx in range(tm.width):
             offset = (ty * tm.width + tx) * stride

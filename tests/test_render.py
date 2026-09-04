@@ -1,6 +1,18 @@
-from tests.helpers import rgba_sprite
+import pytest
 
-from aseprite import Color, ColorMode, Palette, Pixels, Sprite
+from aseprite import (
+    AsepriteError,
+    Color,
+    ColorMode,
+    LayerType,
+    Palette,
+    Pixels,
+    Sprite,
+    Tilemap,
+    Tileset,
+)
+from aseprite._limits import MAX_PIXELS
+from tests.helpers import rgba_sprite
 
 
 def test_flatten_single_cel() -> None:
@@ -54,3 +66,35 @@ def test_image_extra() -> None:
     image = sprite.image(0)
     assert image.size == (1, 1)
     assert image.mode == "RGBA"
+
+
+def test_flatten_rejects_huge_canvas() -> None:
+    sprite = Sprite(8193, 8193)
+    sprite.add_layer("L")
+    sprite.add_frame(100)
+    with pytest.raises(AsepriteError, match="canvas exceeds"):
+        sprite.flatten(0)
+    assert 8193 * 8193 > MAX_PIXELS
+
+
+def test_flatten_rejects_huge_tilemap() -> None:
+    sprite = Sprite(8, 8)
+    sprite.tilesets.append(
+        Tileset(id=0, name="t", tile_count=1, tile_width=256, tile_height=256)
+    )
+    layer = sprite.add_layer("map", layer_type=LayerType.TILEMAP, tileset_index=0)
+    sprite.add_frame(100).set_tilemap_cel(
+        layer,
+        Tilemap(
+            width=256,
+            height=256,
+            bits_per_tile=32,
+            tile_id_mask=0x1FFFFFFF,
+            x_flip_mask=0x20000000,
+            y_flip_mask=0x40000000,
+            d_flip_mask=0x80000000,
+            tiles=b"",
+        ),
+    )
+    with pytest.raises(AsepriteError, match="tilemap exceeds"):
+        sprite.flatten(0)

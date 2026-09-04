@@ -14,6 +14,7 @@ from aseprite._binary import (
     Reader,
 )
 from aseprite._errors import FormatError
+from aseprite._limits import MAX_PALETTE_COLORS, MAX_UNCOMPRESSED_BYTES, bytes_per_tile
 from aseprite._model import (
     HEADER_FLAG_LAYER_UUID,
     BlendMode,
@@ -219,14 +220,13 @@ def read_sprite(data: bytes) -> object:
                     if tileset_tile_index < 0:
                         tileset_user_mode.user_data = attached
                         tileset_tile_index = 0
-                        ntiles = tileset_user_mode.tile_count
-                        if len(tileset_user_mode.tile_user_data) < ntiles:
-                            tileset_user_mode.tile_user_data.extend(
-                                [None]
-                                * (ntiles - len(tileset_user_mode.tile_user_data))
-                            )
                     elif tileset_tile_index < tileset_user_mode.tile_count:
-                        tileset_user_mode.tile_user_data[tileset_tile_index] = attached
+                        tile_ud = tileset_user_mode.tile_user_data
+                        if tileset_tile_index >= len(tile_ud):
+                            tile_ud.extend(
+                                [None] * (tileset_tile_index + 1 - len(tile_ud))
+                            )
+                        tile_ud[tileset_tile_index] = attached
                         tileset_tile_index += 1
                         if tileset_tile_index >= tileset_user_mode.tile_count:
                             tileset_user_mode = None
@@ -292,6 +292,8 @@ def _read_old_palette(r: Reader, scale: int) -> Palette:
             red = min(r.u8() * scale, 255)
             green = min(r.u8() * scale, 255)
             blue = min(r.u8() * scale, 255)
+            if index >= MAX_PALETTE_COLORS:
+                raise FormatError(f"palette size exceeds {MAX_PALETTE_COLORS}")
             if index < len(colors):
                 colors[index] = Color(red, green, blue, 255)
             else:
@@ -305,9 +307,13 @@ def _read_palette(r: Reader) -> Palette:
     first = r.u32()
     last = r.u32()
     r.skip(8)
-    colors = [Color(0, 0, 0, 0) for _ in range(size)]
+    if size > MAX_PALETTE_COLORS:
+        raise FormatError(f"palette size exceeds {MAX_PALETTE_COLORS}")
     if size == 0:
         return Palette()
+    if first > last or last >= size:
+        raise FormatError("palette index range is invalid")
+    colors = [Color(0, 0, 0, 0) for _ in range(size)]
     for index in range(first, last + 1):
         flags = r.u16()
         entry = Color(r.u8(), r.u8(), r.u8(), r.u8())
@@ -335,9 +341,18 @@ def _read_layer(r: Reader, has_uuid: bool) -> Layer:
     return layer
 
 
-def _decompress(raw: bytes) -> bytes:
+def _decompress(raw: bytes, max_size: int) -> bytes:
+    if max_size > MAX_UNCOMPRESSED_BYTES:
+        raise FormatError("decompressed data exceeds the size limit")
     try:
-        return zlib.decompress(raw)
+        decoder = zlib.decompressobj()
+        cap = max(max_size, 1)
+        out = decoder.decompress(raw, cap)
+        if len(out) > max_size:
+            raise FormatError("decompressed data exceeds the size limit")
+        if len(out) == cap and not decoder.eof and decoder.decompress(b"", 1):
+            raise FormatError("decompressed data exceeds the size limit")
+        return out
     except zlib.error as exc:
         raise FormatError("cel image is not valid zlib data") from exc
 
@@ -363,7 +378,8 @@ def _read_cel(r: Reader, color_mode: ColorMode) -> Cel:
         width = r.u16()
         height = r.u16()
         compressed = r.raw(r.remaining())
-        data = _decompress(compressed)
+        expected = width * height * color_mode.bytes_per_pixel
+        data = _decompress(compressed, expected)
         cel.pixels = Pixels(width, height, data, color_mode, compressed=compressed)
     elif cel_type is CelType.COMPRESSED_TILEMAP:
         width = r.u16()
@@ -375,7 +391,8 @@ def _read_cel(r: Reader, color_mode: ColorMode) -> Cel:
         d_flip = r.u32()
         r.skip(10)
         compressed = r.raw(r.remaining())
-        tiles = _decompress(compressed)
+        expected = width * height * bytes_per_tile(bits)
+        tiles = _decompress(compressed, expected)
         cel.tilemap = Tilemap(
             width=width,
             height=height,
@@ -522,8 +539,8 @@ def _read_tileset(r: Reader, color_mode: ColorMode) -> Tileset:
     if flags & 2:
         length = r.u32()
         compressed = r.raw(length)
-        pixels = _decompress(compressed)
         expected = tile_width * tile_height * tile_count * color_mode.bytes_per_pixel
+        pixels = _decompress(compressed, expected)
         if len(pixels) != expected:
             raise FormatError("tileset image size does not match tile dimensions")
     return Tileset(

@@ -110,6 +110,16 @@ python -m aseprite info hero.aseprite
 python -m aseprite export hero.aseprite hero.png --frame 0
 ```
 
+## Limits
+
+These caps bound memory use when you open or flatten a file.
+
+- A palette may have at most 65,536 colors.
+- Cel and tileset zlib data may expand to at most 256 MiB.
+- `flatten()`, `image()`, and `python -m aseprite export` accept at most 67,108,864 pixels (8192×8192).
+
+`python -m aseprite info` still prints metadata when the canvas is larger than that pixel cap.
+
 ## Development
 
 ```sh

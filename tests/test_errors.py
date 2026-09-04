@@ -1,3 +1,5 @@
+import zlib
+
 import pytest
 
 from aseprite import FormatError, Sprite
@@ -7,7 +9,10 @@ from aseprite._binary import (
     FRAME_HEADER_SIZE,
     FRAME_MAGIC,
     HEADER_SIZE,
+    Writer,
 )
+from aseprite._limits import MAX_PALETTE_COLORS
+from aseprite._reader import CHUNK_CEL, CHUNK_PALETTE, CHUNK_TILESET, CHUNK_USER_DATA
 
 
 def _header(
@@ -91,3 +96,88 @@ def test_invalid_zlib() -> None:
     raw[-4:] = b"\x00\x00\x00\x00"
     with pytest.raises(FormatError):
         Sprite.from_bytes(bytes(raw))
+
+
+def _chunk(chunk_type: int, payload: bytes) -> bytes:
+    size = 6 + len(payload)
+    return size.to_bytes(4, "little") + chunk_type.to_bytes(2, "little") + payload
+
+
+def _document(*chunks: bytes, width: int = 1, height: int = 1) -> bytes:
+    body = b"".join(chunks)
+    frame = bytearray(16 + len(body))
+    frame[0:4] = (16 + len(body)).to_bytes(4, "little")
+    frame[4:6] = FRAME_MAGIC.to_bytes(2, "little")
+    frame[6:8] = len(chunks).to_bytes(2, "little")
+    frame[8:10] = (100).to_bytes(2, "little")
+    frame[12:16] = len(chunks).to_bytes(4, "little")
+    frame[16:] = body
+    header = _header(width=width, height=height)
+    header[0:4] = (HEADER_SIZE + len(frame)).to_bytes(4, "little")
+    return bytes(header) + bytes(frame)
+
+
+def test_palette_size_limit() -> None:
+    payload = bytearray()
+    payload += (MAX_PALETTE_COLORS + 1).to_bytes(4, "little")
+    payload += (0).to_bytes(4, "little")
+    payload += (0).to_bytes(4, "little")
+    payload += bytes(8)
+    payload += (0).to_bytes(2, "little")
+    payload += b"\x00\x00\x00\xff"
+    with pytest.raises(FormatError, match="palette size"):
+        Sprite.from_bytes(_document(_chunk(CHUNK_PALETTE, bytes(payload))))
+
+
+def test_decompress_rejects_huge_expected_size() -> None:
+    payload = bytearray()
+    payload += (0).to_bytes(2, "little")
+    payload += (0).to_bytes(2, "little")
+    payload += (0).to_bytes(2, "little")
+    payload += b"\xff"
+    payload += (2).to_bytes(2, "little")
+    payload += (0).to_bytes(2, "little")
+    payload += bytes(5)
+    payload += (65535).to_bytes(2, "little")
+    payload += (65535).to_bytes(2, "little")
+    payload += zlib.compress(b"\x00\x00\x00\xff")
+    with pytest.raises(FormatError, match="size limit"):
+        Sprite.from_bytes(_document(_chunk(CHUNK_CEL, bytes(payload))))
+
+
+def test_decompress_rejects_extra_output() -> None:
+    payload = bytearray()
+    payload += (0).to_bytes(2, "little")
+    payload += (0).to_bytes(2, "little")
+    payload += (0).to_bytes(2, "little")
+    payload += b"\xff"
+    payload += (2).to_bytes(2, "little")
+    payload += (0).to_bytes(2, "little")
+    payload += bytes(5)
+    payload += (1).to_bytes(2, "little")
+    payload += (1).to_bytes(2, "little")
+    payload += zlib.compress(b"\x00" * 1024)
+    with pytest.raises(FormatError, match="size limit"):
+        Sprite.from_bytes(_document(_chunk(CHUNK_CEL, bytes(payload))))
+
+
+def test_tileset_user_data_does_not_preallocate() -> None:
+    tileset = Writer()
+    tileset.u32(0)
+    tileset.u32(0)
+    tileset.u32(10_000_000)
+    tileset.u16(16)
+    tileset.u16(16)
+    tileset.i16(1)
+    tileset.pad(14)
+    tileset.string("t")
+    user = Writer()
+    user.u32(0)
+    sprite = Sprite.from_bytes(
+        _document(
+            _chunk(CHUNK_TILESET, bytes(tileset.buf)),
+            _chunk(CHUNK_USER_DATA, bytes(user.buf)),
+        )
+    )
+    assert sprite.tilesets[0].tile_count == 10_000_000
+    assert sprite.tilesets[0].tile_user_data == []
