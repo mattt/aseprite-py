@@ -57,47 +57,204 @@ uv add "aseprite[image]"
 
 ## Usage
 
-### Open and inspect a file
+`Sprite.open` reads a `.ase` or `.aseprite` file.
+`Sprite.from_bytes` reads the same data from memory.
+Both raise `FormatError` if the bytes are not a valid document.
 
 ```python
+from pathlib import Path
+
 from aseprite import Sprite
 
 sprite = Sprite.open("hero.aseprite")
-print(sprite.width, sprite.height, sprite.color_mode)
+print(sprite.size, sprite.color_mode)
 print(len(sprite.frames), "frames")
+print(len(sprite.layers), "layers")
 
-idle = sprite.tags["idle"]
-print(idle.from_frame, idle.to_frame)
-
-for layer in sprite.layers:
-    print(layer.name, layer.type)
+data = Path("hero.aseprite").read_bytes()
+same = Sprite.from_bytes(data)
 ```
 
-### Flatten a frame
+`open` and `save` also accept a binary file object.
 
 ```python
-from aseprite import Sprite
+from io import BytesIO
 
-sprite = Sprite.open("hero.aseprite")
-rgba = sprite.flatten(frame=0)  # width * height * 4 bytes
+buf = BytesIO()
+sprite.save(buf)
+buf.seek(0)
+copy = Sprite.open(buf)
+```
 
-# Requires aseprite[image]
+### Layers, tags, and slices
+
+Layers, tags, slices, and tilesets support lookup by index or name.
+`"idle" in sprite.tags` is true when a tag with that name exists.
+`get` returns `None` when the name is missing.
+
+```python
+idle = sprite.tags["idle"]
+print(idle.from_frame, idle.to_frame, idle.direction)
+
+if "outline" in sprite.layers:
+    outline = sprite.layers["outline"]
+    print(outline.name, outline.kind, outline.visible)
+
+box = sprite.slices.get("box")
+if box is not None:
+    key = box.keys[0]
+    print(key.x, key.y, key.width, key.height)
+```
+
+Group layers stay in file order.
+`layers.children(group)` returns the direct children.
+
+```python
+from aseprite import LayerType
+
+for layer in sprite.layers:
+    indent = "  " * layer.child_level
+    print(f"{indent}{layer.name} ({layer.kind.name})")
+
+body = sprite.layers.get("body")
+if body is not None and body.kind is LayerType.GROUP:
+    for child in sprite.layers.children(body):
+        print(child.name)
+```
+
+### Cels and pixels
+
+`frame[layer]` returns the cel on that layer, or raises `KeyError`.
+`frame.cel(layer)` returns `None` when the cel is missing.
+RGBA and grayscale pixels are `Color` values.
+Indexed pixels are palette indices.
+
+```python
+layer = sprite.layers[0]
+cel = sprite.frames[0].cel(layer)
+if cel is not None and cel.pixels is not None:
+    print(cel.x, cel.y, cel.pixels[0, 0])
+```
+
+`flatten` composites one frame to `width * height * 4` bytes of RGBA.
+Hidden layers are skipped.
+Linked cels are resolved.
+Only the Normal blend mode is applied.
+A frame index outside the document raises `IndexError`.
+
+`image` returns a Pillow `Image` in RGBA mode.
+It requires the `aseprite[image]` extra.
+
+```python
+rgba = sprite.flatten(frame=0)
 image = sprite.image(frame=0)
 image.save("hero.png")
 ```
 
+[examples/export_png.py](examples/export_png.py) is a
+[PEP 723](https://peps.python.org/pep-0723/) script.
+`uv run` installs `aseprite[image]` for that process and writes a PNG.
+
+```sh
+uv run examples/export_png.py
+uv run examples/export_png.py out.png
+```
+
 ### Create a sprite
 
+`Sprite(width, height)` uses RGBA and adds one layer named `Layer 1`
+and one frame of 100 ms.
+Pass `empty=True` if you do not want those defaults.
+`to_bytes` and `save` raise `ValueError` when there are no frames.
+
 ```python
-from aseprite import ColorMode, Pixels, Sprite
+from aseprite import ColorMode, Sprite
 
 sprite = Sprite(32, 32, ColorMode.RGBA)
-layer = sprite.add_layer("Layer 1")
-frame = sprite.add_frame(duration_ms=100)
-pixels = Pixels.blank(32, 32, ColorMode.RGBA)
-frame.set_cel(layer, pixels, x=0, y=0)
+layer = sprite.layers[0]
+pixels = sprite.blank_pixels()
+pixels[0, 0] = (255, 0, 0, 255)
+pixels[1, 0] = (0, 255, 0)
+sprite.frames[0][layer] = pixels
 sprite.add_tag("idle", 0, 0)
 sprite.save("hero.aseprite")
+```
+
+`add_frame` appends a frame.
+`set_linked_cel` points a later frame at an earlier one on the same layer.
+
+```python
+from aseprite import LoopDirection
+
+walk = sprite.add_frame(duration_ms=80)
+walk.set_linked_cel(layer, 0)
+sprite.add_tag("walk", 0, 1, direction=LoopDirection.FORWARD, repeat=0)
+```
+
+`add_layer` can nest a layer under a group.
+
+```python
+from aseprite import LayerType
+
+group = sprite.add_layer("body", kind=LayerType.GROUP)
+sprite.add_layer("outline", parent=group)
+```
+
+### Indexed color
+
+An indexed sprite stores a palette.
+`transparent_index` selects the index that `flatten` treats as transparent
+on non-background layers.
+
+```python
+from aseprite import Color, ColorMode, Sprite
+
+sprite = Sprite(16, 16, ColorMode.INDEXED)
+sprite.palette.append(Color(0, 0, 0, 0))
+sprite.palette.append(Color(255, 80, 40))
+sprite.transparent_index = 0
+
+pixels = sprite.blank_pixels()
+pixels[2, 3] = 1
+sprite.frames[0][sprite.layers[0]] = pixels
+```
+
+### Slices and user data
+
+A slice is a named rectangle.
+Keys may include a nine-patch center and a pivot.
+
+```python
+from aseprite import NinePatch, SliceKey
+
+sprite.add_slice(
+    "box",
+    [
+        SliceKey(
+            frame=0,
+            x=2,
+            y=2,
+            width=12,
+            height=12,
+            nine_patch=NinePatch(1, 1, 10, 10),
+            pivot=(6, 6),
+        )
+    ],
+)
+```
+
+User data can hold text, a color, and typed properties.
+
+```python
+from aseprite import Color, PropertiesMap, PropertyType, UserData, UserProperty
+
+sprite.layers[0].user_data = UserData(
+    text="npc",
+    color=Color(255, 0, 0),
+    properties=[
+        PropertiesMap(0, [UserProperty("hp", PropertyType.INT32, 10)]),
+    ],
+)
 ```
 
 ### Command line
@@ -109,6 +266,8 @@ That name belongs to the editor.
 python -m aseprite info hero.aseprite
 python -m aseprite export hero.aseprite hero.png --frame 0
 ```
+
+`export` needs the `aseprite[image]` extra.
 
 ## Limits
 
