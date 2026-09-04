@@ -1,5 +1,6 @@
 from io import BytesIO
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -14,9 +15,11 @@ from aseprite import (
     Pixels,
     SliceKey,
     Sprite,
+    Tileset,
     UserData,
     __version__,
 )
+from aseprite._model import TILESET_FLAG_EMBEDDED
 
 
 def test_constructor_is_saveable() -> None:
@@ -50,6 +53,9 @@ def test_named_collections() -> None:
     sprite.add_tag("idle", 0, 0)
     sprite.add_slice("box", [SliceKey(0, 0, 0, 2, 2)])
     sprite.add_tileset("tiles", 2, 2, 1)
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    assert loaded.tilesets["tiles"].tile_width == 2
+    assert loaded.tilesets["tiles"].pixels is None
     assert "idle" in sprite.tags
     assert sprite.tags.get("missing") is None
     assert sprite.tags.get("idle") is sprite.tags[0]
@@ -293,3 +299,69 @@ def test_frame_missing_cel() -> None:
     sprite = Sprite(1, 1)
     with pytest.raises(KeyError):
         sprite.frames[0][99]
+
+
+def test_add_tileset_without_pixels_roundtrips() -> None:
+    sprite = Sprite(8, 8)
+    sprite.add_tileset("tiles", 8, 8, 1)
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    tileset = loaded.tilesets[0]
+    assert tileset.name == "tiles"
+    assert tileset.pixels is None
+    assert not (tileset.flags & TILESET_FLAG_EMBEDDED)
+
+
+def test_add_tileset_with_pixels_roundtrips() -> None:
+    sprite = Sprite(8, 8)
+    pixels = sprite.blank_pixels(8, 8)
+    sprite.add_tileset("tiles", 8, 8, 1, pixels=pixels)
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    assert loaded.tilesets[0].pixels is not None
+    assert loaded.tilesets[0].pixels.width == 8
+    assert loaded.tilesets[0].pixels.height == 8
+
+
+def test_add_tileset_rejects_mismatched_pixels() -> None:
+    sprite = Sprite(8, 8)
+    with pytest.raises(ValueError, match="tile dimensions"):
+        sprite.add_tileset("tiles", 8, 8, 2, pixels=sprite.blank_pixels(8, 8))
+
+
+def test_embedded_tileset_without_pixels_cannot_write() -> None:
+    sprite = Sprite(1, 1)
+    sprite.tilesets.append(
+        Tileset(
+            id=0,
+            name="t",
+            tile_count=1,
+            tile_width=8,
+            tile_height=8,
+            flags=TILESET_FLAG_EMBEDDED,
+        )
+    )
+    with pytest.raises(ValueError, match="tile dimensions"):
+        sprite.to_bytes()
+
+
+def test_nil_uuid_stays_none_when_sibling_has_uuid() -> None:
+    sprite = Sprite(1, 1)
+    sprite.add_layer("B")
+    sprite.layers[0].uuid = UUID(int=42)
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    assert loaded.layers[0].uuid == UUID(int=42)
+    assert loaded.layers[1].uuid is None
+
+
+def test_new_sprite_num_colors() -> None:
+    sprite = Sprite(1, 1)
+    assert sprite.num_colors == 256
+    assert Sprite.from_bytes(sprite.to_bytes()).num_colors == 256
+
+
+def test_write_rejects_oversized_palette() -> None:
+    from aseprite._limits import MAX_PALETTE_COLORS
+
+    sprite = Sprite(1, 1)
+    sprite.palette.extend([Color(0, 0, 0)] * (MAX_PALETTE_COLORS + 1))
+    with pytest.raises(ValueError, match="palette size"):
+        sprite.to_bytes()

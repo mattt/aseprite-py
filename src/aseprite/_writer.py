@@ -12,6 +12,7 @@ from aseprite._binary import (
     HEADER_SIZE,
     Writer,
 )
+from aseprite._limits import MAX_PALETTE_COLORS
 from aseprite._model import (
     HEADER_FLAG_LAYER_UUID,
     TILESET_FLAG_EMBEDDED,
@@ -196,6 +197,8 @@ def _write_header(w: Writer, sprite: Sprite, file_size: int) -> None:
     w.u8(sprite.transparent_index)
     w.pad(3)
     ncolors = len(sprite.palette) or sprite.num_colors or 0
+    if ncolors > MAX_PALETTE_COLORS:
+        raise ValueError(f"palette size exceeds {MAX_PALETTE_COLORS}")
     w.u16(ncolors)
     w.u8(sprite.pixel_width)
     w.u8(sprite.pixel_height)
@@ -223,6 +226,8 @@ def _write_old_palette(w: Writer, palette: Palette) -> None:
 
 def _write_palette(w: Writer, palette: Palette) -> None:
     colors = palette.colors
+    if len(colors) > MAX_PALETTE_COLORS:
+        raise ValueError(f"palette size exceeds {MAX_PALETTE_COLORS}")
     w.u32(len(colors))
     w.u32(0)
     w.u32(len(colors) - 1 if colors else 0)
@@ -417,7 +422,16 @@ def _write_tileset(w: Writer, tileset, color_mode: ColorMode) -> None:  # noqa: 
         w.u32(tileset.external_file_id or 0)
         w.u32(tileset.external_tileset_id or 0)
     if tileset.flags & TILESET_FLAG_EMBEDDED:
-        pixel_data = tileset.pixels.data if tileset.pixels is not None else b""
-        compressed = _compress(pixel_data, tileset.compressed)
+        pixels = tileset.pixels
+        expected_height = tileset.tile_height * tileset.tile_count
+        if (
+            pixels is None
+            or pixels.width != tileset.tile_width
+            or pixels.height != expected_height
+        ):
+            raise ValueError(
+                "embedded tileset image size does not match tile dimensions"
+            )
+        compressed = _compress(pixels.data, tileset.compressed)
         w.u32(len(compressed))
         w.raw(compressed)

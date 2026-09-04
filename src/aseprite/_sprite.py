@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
 from aseprite._model import (
+    TILESET_FLAG_EMBEDDED,
+    TILESET_FLAG_EMPTY_IS_ZERO,
     BlendMode,
     Cel,
     ColorMode,
@@ -86,7 +88,7 @@ class Sprite:
         self.group_blend = False
         self.deprecated_speed = 0
         self.transparent_index = 0
-        self.num_colors = 0
+        self.num_colors = 256
         self.pixel_width = 1
         self.pixel_height = 1
         self.grid = Grid()
@@ -311,14 +313,23 @@ class Sprite:
             tile_height: Height of one tile, in pixels.
             tile_count: The number of tiles.
             pixels: Optional embedded tile image.
+                Width must be ``tile_width``.
+                Height must be ``tile_height * tile_count``.
             tileset_id: File-format tileset ID. The default is the next index.
         """
+        flags = TILESET_FLAG_EMPTY_IS_ZERO
+        if pixels is not None:
+            expected_height = tile_height * tile_count
+            if pixels.width != tile_width or pixels.height != expected_height:
+                raise ValueError("tileset image size does not match tile dimensions")
+            flags |= TILESET_FLAG_EMBEDDED
         tileset = Tileset(
             id=len(self.tilesets) if tileset_id is None else tileset_id,
             name=name,
             tile_count=tile_count,
             tile_width=tile_width,
             tile_height=tile_height,
+            flags=flags,
             pixels=pixels,
         )
         self.tilesets.append(tileset)
