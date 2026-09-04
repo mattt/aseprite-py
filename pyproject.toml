@@ -38,6 +38,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "pytest-cov>=6.0.0",
     "ruff>=0.16.6",
     "ty>=0.0.78",
 ]
@@ -61,6 +62,9 @@ quote-style = "double"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["aseprite"]
 
 [tool.ty.environment]
 root = ["./src"]
