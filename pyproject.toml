@@ -1,0 +1,67 @@
+[project]
+name = "aseprite"
+version = "0.1.0"
+description = "Read and write Aseprite .ase/.aseprite files"
+readme = "README.md"
+authors = [
+    { name = "Mattt", email = "mattt@me.com" }
+]
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["aseprite", "ase", "pixel-art", "sprites"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics",
+    "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/mattt/aseprite-py"
+Repository = "https://github.com/mattt/aseprite-py"
+Issues = "https://github.com/mattt/aseprite-py/issues"
+
+[project.optional-dependencies]
+image = [
+    "pillow>=12.3.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.10.0,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.6",
+    "ty>=0.0.78",
+]
+
+[tool.ruff]
+src = ["src", "tests"]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.ruff.format]
+docstring-code-format = true
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ty.environment]
+root = ["./src"]
+extra-paths = ["."]
