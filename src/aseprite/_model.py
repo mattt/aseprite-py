@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, MutableSequence, Sequence
+from collections.abc import Callable, Iterable, Iterator, MutableSequence, Sequence
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
 from typing import Protocol, cast, overload
@@ -151,7 +151,7 @@ class Pixels:
 
     width: int
     height: int
-    data: bytes
+    data: bytes | bytearray
     color_mode: ColorMode
     compressed: bytes | None = field(default=None, compare=False, repr=False)
 
@@ -199,9 +199,11 @@ class Pixels:
     ) -> None:
         i = self._offset(key)
         packed = _pack_pixel(self.color_mode, value)
-        data = bytearray(self.data)
+        data = self.data
+        if not isinstance(data, bytearray):
+            data = bytearray(data)
+            self.data = data
         data[i : i + len(packed)] = packed
-        self.data = bytes(data)
 
     def __buffer__(self, _flags: int) -> memoryview:
         return memoryview(self.data)
@@ -667,8 +669,28 @@ class TagList(_NamedList[Tag]):
 class LayerList(_NamedList[Layer]):
     """A sequence of layers that supports lookup by name or index."""
 
+    def __init__(
+        self,
+        items: Iterable[Layer] | None = None,
+        *,
+        on_remap: Callable[[dict[int, int | None]], None] | None = None,
+    ) -> None:
+        self._on_remap = on_remap
+        self._prev: list[Layer] = []
+        super().__init__(items)
+
     def _after_mutate(self) -> None:
-        _reindex_layers(self._items)
+        old_index = {id(layer): i for i, layer in enumerate(self._prev)}
+        mapping: dict[int, int | None] = dict.fromkeys(range(len(self._prev)))
+        for new_index, layer in enumerate(self._items):
+            previous = old_index.get(id(layer))
+            if previous is not None:
+                mapping[previous] = new_index
+            layer.index = new_index
+        previous_len = len(self._prev)
+        self._prev = list(self._items)
+        if self._on_remap is not None and previous_len:
+            self._on_remap(mapping)
 
     def children(self, group: Layer) -> list[Layer]:
         """Returns the direct child layers of a group."""
@@ -779,8 +801,3 @@ class UnknownChunk:
 
 def _layer_index(layer: Layer | int) -> int:
     return layer.index if isinstance(layer, Layer) else layer
-
-
-def _reindex_layers(layers: Sequence[Layer]) -> None:
-    for index, layer in enumerate(layers):
-        layer.index = index

@@ -77,6 +77,8 @@ class Sprite:
     ) -> None:
         if width <= 0 or height <= 0:
             raise ValueError("sprite dimensions must be positive")
+        if width > 0xFFFF or height > 0xFFFF:
+            raise ValueError("sprite dimensions exceed 65535")
         self.width = width
         self.height = height
         self.color_mode = color_mode
@@ -90,8 +92,8 @@ class Sprite:
         self.grid = Grid()
         self.color_profile: ColorProfile | None = ColorProfile()
         self.palette = Palette()
-        self.layers = LayerList()
         self.frames: list[Frame] = []
+        self.layers = LayerList(on_remap=self._remap_cels)
         self.tags = TagList()
         self.slices = SliceList()
         self.tilesets = TilesetList()
@@ -237,16 +239,16 @@ class Sprite:
             self.layers.append(layer)
         else:
             layer.child_level = parent.child_level + 1
-            insert_at = self.layers._descendants_end(parent)
-            self.layers.insert(insert_at, layer)
-            self._remap_cels_after_insert(insert_at)
+            self.layers.insert(self.layers._descendants_end(parent), layer)
         return layer
 
-    def _remap_cels_after_insert(self, insert_at: int) -> None:
+    def _remap_cels(self, mapping: dict[int, int | None]) -> None:
         for frame in self.frames:
             updated: dict[int, Cel] = {}
-            for index, cel in list(frame._cels.items()):
-                new_index = index + 1 if index >= insert_at else index
+            for index, cel in frame._cels.items():
+                new_index = mapping.get(index)
+                if new_index is None:
+                    continue
                 cel.layer_index = new_index
                 updated[new_index] = cel
             frame._cels = updated

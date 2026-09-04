@@ -6,6 +6,7 @@ from aseprite import (
     Color,
     ColorMode,
     HeaderFlags,
+    Layer,
     LayerType,
     NinePatch,
     Palette,
@@ -121,6 +122,68 @@ def test_flatten_out_of_range() -> None:
 def test_bad_dimensions() -> None:
     with pytest.raises(ValueError, match="positive"):
         Sprite(0, 1)
+    with pytest.raises(ValueError, match="65535"):
+        Sprite(65_536, 1)
+
+
+def test_write_rejects_out_of_range_fields() -> None:
+    sprite = Sprite(1, 1)
+    sprite.frames[0].duration_ms = 100_000
+    with pytest.raises(ValueError, match="out of range"):
+        sprite.to_bytes()
+    sprite.frames[0].duration_ms = 100
+    sprite.frames[0].set_cel(sprite.layers[0], sprite.blank_pixels(1, 1), x=40_000)
+    with pytest.raises(ValueError, match="out of range"):
+        sprite.to_bytes()
+
+
+def test_delete_layer_drops_its_cel() -> None:
+    sprite = Sprite(1, 1)
+    first = sprite.layers[0]
+    second = sprite.add_layer("B")
+    sprite.frames[0][first] = Pixels(1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA)
+    sprite.frames[0][second] = Pixels(1, 1, b"\x00\xff\x00\xff", ColorMode.RGBA)
+    del sprite.layers[0]
+    assert sprite.layers[0] is second
+    cel = sprite.frames[0].cel(second)
+    assert cel is not None and cel.pixels is not None
+    assert cel.pixels.data == b"\x00\xff\x00\xff"
+    assert sprite.flatten(0) == b"\x00\xff\x00\xff"
+
+
+def test_insert_layer_shifts_cels() -> None:
+    sprite = Sprite(1, 1)
+    layer = sprite.layers[0]
+    sprite.frames[0][layer] = Pixels(1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA)
+    sprite.layers.insert(0, Layer("front"))
+    assert layer.index == 1
+    cel = sprite.frames[0].cel(layer)
+    assert cel is not None and cel.pixels is not None
+    assert bytes(cel.pixels.data) == b"\xff\x00\x00\xff"
+
+
+def test_layer_opacity_flag_roundtrip() -> None:
+    sprite = Sprite(1, 1)
+    sprite.valid_layer_opacity = False
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    assert loaded.valid_layer_opacity is False
+
+
+def test_new_indexed_sprite_omits_old_palette() -> None:
+    sprite = Sprite(1, 1, ColorMode.INDEXED)
+    sprite.palette.append(Color(1, 2, 3))
+    from aseprite._binary import FRAME_HEADER_SIZE, HEADER_SIZE, Reader
+
+    data = sprite.to_bytes()
+    r = Reader(data, HEADER_SIZE)
+    r.skip(FRAME_HEADER_SIZE - 4)
+    nchunks = r.u32()
+    types = []
+    for _ in range(nchunks):
+        size = r.u32()
+        types.append(r.u16())
+        r.skip(size - 6)
+    assert 0x0004 not in types
 
 
 def test_header_flags() -> None:

@@ -10,7 +10,7 @@ from aseprite import (
     Tilemap,
     Tileset,
 )
-from aseprite._limits import MAX_PIXELS
+from aseprite._limits import MAX_GROUP_DEPTH, MAX_PIXELS
 from tests.helpers import rgba_sprite
 
 
@@ -97,4 +97,15 @@ def test_flatten_rejects_huge_tilemap() -> None:
         ),
     )
     with pytest.raises(ValueError, match="tilemap exceeds"):
+        sprite.flatten(0)
+
+
+def test_flatten_rejects_deep_groups() -> None:
+    sprite = Sprite(1, 1, empty=True)
+    parent = None
+    for i in range(MAX_GROUP_DEPTH + 2):
+        parent = sprite.add_layer(f"g{i}", parent=parent, kind=LayerType.GROUP)
+    sprite.add_layer("leaf", parent=parent)
+    sprite.add_frame()
+    with pytest.raises(ValueError, match="nesting"):
         sprite.flatten(0)

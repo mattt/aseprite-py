@@ -5,7 +5,7 @@ from __future__ import annotations
 import struct
 from typing import TYPE_CHECKING
 
-from aseprite._limits import MAX_PIXELS, bytes_per_tile
+from aseprite._limits import MAX_GROUP_DEPTH, MAX_PIXELS, bytes_per_tile
 from aseprite._model import (
     BlendMode,
     Cel,
@@ -43,7 +43,10 @@ def _composite_layers(
     layers: list[Layer],
     dest: bytearray,
     isolate_groups: bool,
+    depth: int = 0,
 ) -> None:
+    if depth > MAX_GROUP_DEPTH:
+        raise ValueError(f"layer group nesting exceeds {MAX_GROUP_DEPTH} levels")
     entries: list[tuple[int, int, Layer, Cel]] = []
     for layer in layers:
         if not layer.visible:
@@ -57,6 +60,7 @@ def _composite_layers(
                     sprite.layers.children(layer),
                     child_buf,
                     isolate_groups,
+                    depth + 1,
                 )
                 _blend_buffer(dest, child_buf, layer.opacity, layer.blend_mode)
             else:
@@ -66,6 +70,7 @@ def _composite_layers(
                     sprite.layers.children(layer),
                     dest,
                     isolate_groups,
+                    depth + 1,
                 )
             continue
         cel = _resolve_cel(sprite, layer, frame_index)
@@ -140,7 +145,7 @@ def _tiles_to_pixels(sprite: Sprite, layer: Layer, cel: Cel) -> Pixels | None:
             x_flip = bool(value & tm.x_flip_mask)
             y_flip = bool(value & tm.y_flip_mask)
             d_flip = bool(value & tm.d_flip_mask)
-            tile = _flip_tile(tile, tw, th, bpp, x_flip, y_flip, d_flip)
+            tile = _flip_tile(bytes(tile), tw, th, bpp, x_flip, y_flip, d_flip)
             for row in range(th):
                 dest_row = ((ty * th + row) * out_w + tx * tw) * bpp
                 src_row = row * tw * bpp
@@ -200,7 +205,7 @@ def _blit_cel(sprite: Sprite, layer: Layer, cel: Cel, dest: bytearray) -> None:
 def _pixel_rgba(sprite: Sprite, layer: Layer, pixels: Pixels, x: int, y: int) -> bytes:
     i = (y * pixels.width + x) * pixels.color_mode.bytes_per_pixel
     if pixels.color_mode is ColorMode.RGBA:
-        return pixels.data[i : i + 4]
+        return bytes(pixels.data[i : i + 4])
     if pixels.color_mode is ColorMode.GRAYSCALE:
         value, alpha = pixels.data[i], pixels.data[i + 1]
         return bytes((value, value, value, alpha))
