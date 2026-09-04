@@ -1,6 +1,5 @@
-from tests.helpers import rgba_sprite
-
 from aseprite.__main__ import main
+from tests.helpers import rgba_sprite
 
 
 def test_info(tmp_path, capsys) -> None:  # noqa: ANN001
