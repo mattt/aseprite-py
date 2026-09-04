@@ -12,6 +12,7 @@ from aseprite import (
     Tileset,
 )
 from aseprite._limits import MAX_GROUP_DEPTH, MAX_PIXELS
+from aseprite._model import TILESET_FLAG_EMBEDDED
 from tests.helpers import (
     TILE_BL,
     TILE_BR,
@@ -109,6 +110,19 @@ def test_flatten_rejects_huge_tilemap() -> None:
         sprite.flatten(0)
 
 
+def test_flatten_rejects_isolated_group_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("aseprite._render.MAX_UNCOMPRESSED_BYTES", 8)
+    sprite = Sprite(2, 2, empty=True)
+    sprite.group_blend = True
+    group = sprite.add_layer("g", kind=LayerType.GROUP)
+    sprite.add_layer("c", parent=group)
+    sprite.add_frame()
+    with pytest.raises(ValueError, match="isolated"):
+        sprite.flatten(0)
+
+
 def test_flatten_rejects_deep_groups() -> None:
     sprite = Sprite(1, 1, empty=True)
     parent = None
@@ -140,6 +154,40 @@ def test_flatten_tilemap_d_flip() -> None:
     assert (
         tilemap_sprite(d_flip=True).flatten(0) == TILE_TL + TILE_BL + TILE_TR + TILE_BR
     )
+
+
+def test_flatten_tilemap_d_flip_nonsquare() -> None:
+    sprite = Sprite(2, 2, ColorMode.RGBA, empty=True)
+    sprite.tilesets.append(
+        Tileset(
+            id=0,
+            name="t",
+            tile_count=1,
+            tile_width=2,
+            tile_height=1,
+            flags=TILESET_FLAG_EMBEDDED,
+            pixels=Pixels(2, 1, TILE_TL + TILE_TR, ColorMode.RGBA),
+        )
+    )
+    layer = sprite.add_layer("map", kind=LayerType.TILEMAP, tileset_index=0)
+    sprite.add_frame(100).set_tilemap_cel(
+        layer,
+        Tilemap(
+            width=1,
+            height=1,
+            bits_per_tile=32,
+            tile_id_mask=0x1FFFFFFF,
+            x_flip_mask=0x20000000,
+            y_flip_mask=0x40000000,
+            d_flip_mask=0x80000000,
+            tiles=(0x80000000).to_bytes(4, "little"),
+        ),
+    )
+    data = sprite.flatten(0)
+    assert data[0:4] == TILE_TL
+    assert data[4:8] == b"\x00\x00\x00\x00"
+    assert data[8:12] == TILE_TR
+    assert data[12:16] == b"\x00\x00\x00\x00"
 
 
 def test_flatten_tilemap_16bit_and_empty_is_zero() -> None:

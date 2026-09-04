@@ -5,7 +5,12 @@ from __future__ import annotations
 import struct
 from typing import TYPE_CHECKING
 
-from aseprite._limits import MAX_GROUP_DEPTH, MAX_PIXELS, bytes_per_tile
+from aseprite._limits import (
+    MAX_GROUP_DEPTH,
+    MAX_PIXELS,
+    MAX_UNCOMPRESSED_BYTES,
+    bytes_per_tile,
+)
 from aseprite._model import (
     BlendMode,
     Cel,
@@ -27,12 +32,14 @@ def flatten_frame(sprite: Sprite, frame_index: int) -> bytes:
         raise ValueError(f"canvas exceeds {MAX_PIXELS} pixels")
     dest = bytearray(sprite.width * sprite.height * 4)
     isolate_groups = sprite.group_blend
+    scratches: list[bytearray] = []
     _composite_layers(
         sprite,
         frame_index,
         [layer for layer in sprite.layers if layer.child_level == 0],
         dest,
         isolate_groups,
+        scratches,
     )
     return bytes(dest)
 
@@ -43,6 +50,7 @@ def _composite_layers(
     layers: list[Layer],
     dest: bytearray,
     isolate_groups: bool,
+    scratches: list[bytearray],
     depth: int = 0,
 ) -> None:
     if depth > MAX_GROUP_DEPTH:
@@ -53,13 +61,22 @@ def _composite_layers(
             continue
         if layer.kind is LayerType.GROUP:
             if isolate_groups:
-                child_buf = bytearray(sprite.width * sprite.height * 4)
+                canvas_bytes = sprite.width * sprite.height * 4
+                if (depth + 1) * canvas_bytes > MAX_UNCOMPRESSED_BYTES:
+                    raise ValueError(
+                        "isolated group compositing exceeds the size limit"
+                    )
+                while len(scratches) <= depth:
+                    scratches.append(bytearray(canvas_bytes))
+                child_buf = scratches[depth]
+                child_buf[:] = b"\x00" * canvas_bytes
                 _composite_layers(
                     sprite,
                     frame_index,
                     sprite.layers.children(layer),
                     child_buf,
                     isolate_groups,
+                    scratches,
                     depth + 1,
                 )
                 _blend_buffer(dest, child_buf, layer.opacity, layer.blend_mode)
@@ -70,6 +87,7 @@ def _composite_layers(
                     sprite.layers.children(layer),
                     dest,
                     isolate_groups,
+                    scratches,
                     depth + 1,
                 )
             continue
@@ -116,8 +134,8 @@ def _tiles_to_pixels(sprite: Sprite, layer: Layer, cel: Cel) -> Pixels | None:
     tileset = sprite.tilesets[layer.tileset_index]
     bpp = sprite.color_mode.bytes_per_pixel
     tw, th = tileset.tile_width, tileset.tile_height
-    out_w = tm.width * tw
-    out_h = tm.height * th
+    out_w = (tm.width - 1) * tw + max(tw, th) if tm.width else 0
+    out_h = (tm.height - 1) * th + max(tw, th) if tm.height else 0
     if out_w < 0 or out_h < 0 or out_w * out_h > MAX_PIXELS:
         raise ValueError(f"tilemap exceeds {MAX_PIXELS} pixels")
     out = bytearray(out_w * out_h * bpp)
@@ -145,11 +163,17 @@ def _tiles_to_pixels(sprite: Sprite, layer: Layer, cel: Cel) -> Pixels | None:
             x_flip = bool(value & tm.x_flip_mask)
             y_flip = bool(value & tm.y_flip_mask)
             d_flip = bool(value & tm.d_flip_mask)
-            tile = _flip_tile(bytes(tile), tw, th, bpp, x_flip, y_flip, d_flip)
-            for row in range(th):
-                dest_row = ((ty * th + row) * out_w + tx * tw) * bpp
-                src_row = row * tw * bpp
-                out[dest_row : dest_row + tw * bpp] = tile[src_row : src_row + tw * bpp]
+            tile, fw, fh = _flip_tile(bytes(tile), tw, th, bpp, x_flip, y_flip, d_flip)
+            for row in range(fh):
+                dest_y = ty * th + row
+                dest_x = tx * tw
+                if dest_y < 0 or dest_y >= out_h:
+                    continue
+                dest_row = (dest_y * out_w + dest_x) * bpp
+                src_row = row * fw * bpp
+                copy = min(fw, out_w - dest_x) * bpp
+                if copy > 0:
+                    out[dest_row : dest_row + copy] = tile[src_row : src_row + copy]
     return Pixels(out_w, out_h, bytes(out), sprite.color_mode)
 
 
@@ -161,7 +185,7 @@ def _flip_tile(
     x_flip: bool,
     y_flip: bool,
     d_flip: bool,
-) -> bytes:
+) -> tuple[bytes, int, int]:
     pixels = [
         data[(y * width + x) * bpp : (y * width + x) * bpp + bpp]
         for y in range(height)
@@ -183,7 +207,7 @@ def _flip_tile(
         pixels = [pixels[y * w + (w - 1 - x)] for y in range(h) for x in range(w)]
     if y_flip:
         pixels = [pixels[(h - 1 - y) * w + x] for y in range(h) for x in range(w)]
-    return b"".join(pixels)
+    return b"".join(pixels), w, h
 
 
 def _blit_cel(sprite: Sprite, layer: Layer, cel: Cel, dest: bytearray) -> None:
