@@ -1,6 +1,7 @@
 import pytest
 
 from aseprite import (
+    BlendMode,
     Color,
     ColorMode,
     LayerType,
@@ -11,7 +12,15 @@ from aseprite import (
     Tileset,
 )
 from aseprite._limits import MAX_GROUP_DEPTH, MAX_PIXELS
-from tests.helpers import rgba_sprite
+from tests.helpers import (
+    TILE_BL,
+    TILE_BR,
+    TILE_PIXELS,
+    TILE_TL,
+    TILE_TR,
+    rgba_sprite,
+    tilemap_sprite,
+)
 
 
 def test_flatten_single_cel() -> None:
@@ -109,3 +118,133 @@ def test_flatten_rejects_deep_groups() -> None:
     sprite.add_frame()
     with pytest.raises(ValueError, match="nesting"):
         sprite.flatten(0)
+
+
+def test_flatten_tilemap() -> None:
+    assert tilemap_sprite().flatten(0) == TILE_PIXELS
+
+
+def test_flatten_tilemap_x_flip() -> None:
+    assert (
+        tilemap_sprite(x_flip=True).flatten(0) == TILE_TR + TILE_TL + TILE_BR + TILE_BL
+    )
+
+
+def test_flatten_tilemap_y_flip() -> None:
+    assert (
+        tilemap_sprite(y_flip=True).flatten(0) == TILE_BL + TILE_BR + TILE_TL + TILE_TR
+    )
+
+
+def test_flatten_tilemap_d_flip() -> None:
+    assert (
+        tilemap_sprite(d_flip=True).flatten(0) == TILE_TL + TILE_BL + TILE_TR + TILE_BR
+    )
+
+
+def test_flatten_tilemap_16bit_and_empty_is_zero() -> None:
+    assert tilemap_sprite(bits_per_tile=16).flatten(0) == TILE_PIXELS
+    assert tilemap_sprite(empty_is_zero=True).flatten(0) == b"\x00" * 16
+
+
+def test_flatten_grayscale() -> None:
+    sprite = Sprite(1, 1, ColorMode.GRAYSCALE)
+    sprite.frames[0].set_cel(
+        sprite.layers[0], Pixels(1, 1, b"\x10\xff", ColorMode.GRAYSCALE)
+    )
+    assert sprite.flatten(0) == b"\x10\x10\x10\xff"
+
+
+def test_flatten_group_blend_isolates_opacity() -> None:
+    sprite = Sprite(1, 1, ColorMode.RGBA, empty=True)
+    group = sprite.add_layer("g", kind=LayerType.GROUP, opacity=128)
+    child = sprite.add_layer("c", parent=group)
+    sprite.add_frame(100).set_cel(
+        child, Pixels(1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA)
+    )
+    sprite.group_blend = False
+    assert sprite.flatten(0) == b"\xff\x00\x00\xff"
+    sprite.group_blend = True
+    isolated = sprite.flatten(0)
+    assert isolated[0:3] == b"\xff\x00\x00"
+    assert isolated[3] == 128
+
+
+def test_flatten_cel_offset_and_clip() -> None:
+    sprite = Sprite(2, 2, ColorMode.RGBA, empty=True)
+    layer = sprite.add_layer("L")
+    sprite.add_frame(100).set_cel(
+        layer, Pixels(1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA), x=1, y=1
+    )
+    data = sprite.flatten(0)
+    assert data[0:12] == b"\x00" * 12
+    assert data[12:16] == b"\xff\x00\x00\xff"
+
+    clipped = Sprite(2, 2, ColorMode.RGBA, empty=True)
+    clayer = clipped.add_layer("L")
+    clipped.add_frame(100).set_cel(
+        clayer,
+        Pixels(
+            2,
+            2,
+            b"\x01\x00\x00\xff\x02\x00\x00\xff\x03\x00\x00\xff\x04\x00\x00\xff",
+            ColorMode.RGBA,
+        ),
+        x=-1,
+        y=-1,
+    )
+    assert clipped.flatten(0)[0:4] == b"\x04\x00\x00\xff"
+    assert clipped.flatten(0)[4:] == b"\x00" * 12
+
+
+def test_flatten_z_index() -> None:
+    sprite = Sprite(1, 1, ColorMode.RGBA, empty=True)
+    bottom = sprite.add_layer("bottom")
+    top = sprite.add_layer("top")
+    frame = sprite.add_frame(100)
+    frame.set_cel(bottom, Pixels(1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA), z_index=1)
+    frame.set_cel(top, Pixels(1, 1, b"\x00\xff\x00\xff", ColorMode.RGBA), z_index=0)
+    assert sprite.flatten(0) == b"\xff\x00\x00\xff"
+
+
+def test_flatten_linked_chain_and_cycle() -> None:
+    sprite = Sprite(1, 1, ColorMode.RGBA, empty=True)
+    layer = sprite.add_layer("L")
+    sprite.add_frame(100).set_cel(
+        layer, Pixels(1, 1, b"\x01\x02\x03\xff", ColorMode.RGBA)
+    )
+    sprite.add_frame(100).set_linked_cel(layer, 0)
+    sprite.add_frame(100).set_linked_cel(layer, 1)
+    assert sprite.flatten(2) == b"\x01\x02\x03\xff"
+
+    cycle = Sprite(1, 1, ColorMode.RGBA, empty=True)
+    clayer = cycle.add_layer("L")
+    cycle.add_frame(100).set_linked_cel(clayer, 1)
+    cycle.add_frame(100).set_linked_cel(clayer, 0)
+    assert cycle.flatten(0) == b"\x00\x00\x00\x00"
+
+
+def test_flatten_indexed_background_keeps_transparent_index() -> None:
+    sprite = Sprite(1, 1, ColorMode.INDEXED)
+    sprite.palette = Palette([Color(255, 0, 0), Color(0, 255, 0)])
+    sprite.transparent_index = 0
+    sprite.layers[0].background = True
+    sprite.frames[0].set_cel(sprite.layers[0], Pixels(1, 1, b"\x00", ColorMode.INDEXED))
+    assert sprite.flatten(0) == b"\xff\x00\x00\xff"
+
+
+def test_flatten_indexed_out_of_range_is_transparent() -> None:
+    sprite = Sprite(1, 1, ColorMode.INDEXED)
+    sprite.palette = Palette([Color(255, 0, 0)])
+    sprite.frames[0].set_cel(sprite.layers[0], Pixels(1, 1, b"\x05", ColorMode.INDEXED))
+    assert sprite.flatten(0) == b"\x00\x00\x00\x00"
+
+
+def test_flatten_non_normal_blend_uses_normal() -> None:
+    sprite = Sprite(1, 1, ColorMode.RGBA, empty=True)
+    bottom = sprite.add_layer("b")
+    top = sprite.add_layer("t", blend_mode=BlendMode.MULTIPLY)
+    frame = sprite.add_frame(100)
+    frame.set_cel(bottom, Pixels(1, 1, b"\x00\x00\xff\xff", ColorMode.RGBA))
+    frame.set_cel(top, Pixels(1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA))
+    assert sprite.flatten(0) == b"\xff\x00\x00\xff"
