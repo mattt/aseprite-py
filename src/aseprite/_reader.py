@@ -289,11 +289,11 @@ def read_sprite(data: bytes) -> Sprite:
     return sprite
 
 
-def _enum(enum_cls, value: int, default):  # noqa: ANN001
+def _enum(enum_cls, value: int, label: str):  # noqa: ANN001
     try:
         return enum_cls(value)
-    except ValueError:
-        return default
+    except ValueError as exc:
+        raise FormatError(f"unsupported {label} {value}") from exc
 
 
 def _read_old_palette(r: Reader, scale: int) -> Palette:
@@ -342,10 +342,14 @@ def _read_palette(r: Reader) -> Palette:
 
 def _read_layer(r: Reader, has_uuid: bool) -> Layer:
     flags = r.u16()
-    kind = _enum(LayerType, r.u16(), LayerType.IMAGE)
+    kind_value = r.u16()
+    try:
+        kind = LayerType(kind_value)
+    except ValueError as exc:
+        raise FormatError(f"unsupported layer type {kind_value}") from exc
     child_level = r.u16()
     r.skip(4)
-    blend = _enum(BlendMode, r.u16(), BlendMode.NORMAL)
+    blend = _enum(BlendMode, r.u16(), "blend mode")
     opacity = r.u8()
     r.skip(3)
     name = r.string()
@@ -353,7 +357,9 @@ def _read_layer(r: Reader, has_uuid: bool) -> Layer:
     if kind is LayerType.TILEMAP:
         layer.tileset_index = r.u32()
     if has_uuid and r.remaining() >= 16:
-        layer.uuid = UUID(bytes=r.uuid())
+        raw = r.uuid()
+        if any(raw):
+            layer.uuid = UUID(bytes=raw)
     return layer
 
 
@@ -457,7 +463,7 @@ def _read_cel_extra(r: Reader) -> CelExtra:
 
 
 def _read_color_profile(r: Reader) -> ColorProfile:
-    ptype = _enum(ColorProfileType, r.u16(), ColorProfileType.NONE)
+    ptype = _enum(ColorProfileType, r.u16(), "color profile type")
     flags = r.u16()
     gamma = r.u32()
     r.skip(8)
@@ -479,7 +485,7 @@ def _read_external_files(r: Reader) -> list[ExternalFile]:
     files: list[ExternalFile] = []
     for _ in range(count):
         entry_id = r.u32()
-        ftype = _enum(ExternalFileType, r.u8(), ExternalFileType.PALETTE)
+        ftype = _enum(ExternalFileType, r.u8(), "external file type")
         r.skip(7)
         name = r.string()
         files.append(ExternalFile(id=entry_id, kind=ftype, name=name))
@@ -505,7 +511,7 @@ def _read_tags(r: Reader) -> list[Tag]:
     for _ in range(count):
         frm = r.u16()
         to = r.u16()
-        direction = _enum(LoopDirection, r.u8(), LoopDirection.FORWARD)
+        direction = _enum(LoopDirection, r.u8(), "loop direction")
         repeat = r.u16()
         r.skip(6)
         color = (r.u8(), r.u8(), r.u8())

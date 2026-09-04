@@ -13,8 +13,10 @@ from aseprite._binary import (
 from aseprite._limits import MAX_PALETTE_COLORS
 from aseprite._reader import (
     CHUNK_CEL,
+    CHUNK_COLOR_PROFILE,
     CHUNK_LAYER,
     CHUNK_PALETTE,
+    CHUNK_TAGS,
     CHUNK_TILESET,
     CHUNK_USER_DATA,
 )
@@ -137,6 +139,64 @@ def test_short_cel_pixels_is_format_error() -> None:
                 _chunk(CHUNK_CEL, _raw_cel_payload(width=2, height=2, pixels=b"\x00"))
             )
         )
+
+
+def test_unknown_blend_mode_is_format_error() -> None:
+    layer = Writer()
+    layer.u16(3)
+    layer.u16(0)
+    layer.u16(0)
+    layer.u16(0)
+    layer.u16(0)
+    layer.u16(99)
+    layer.u8(255)
+    layer.pad(3)
+    layer.string("L")
+    with pytest.raises(FormatError, match="unsupported blend mode"):
+        Sprite.from_bytes(_document(_chunk(CHUNK_LAYER, bytes(layer.buf))))
+
+
+def test_unknown_layer_type_is_format_error() -> None:
+    layer = Writer()
+    layer.u16(3)
+    layer.u16(99)
+    layer.u16(0)
+    layer.u16(0)
+    layer.u16(0)
+    layer.u16(0)
+    layer.u8(255)
+    layer.pad(3)
+    layer.string("L")
+    with pytest.raises(FormatError, match="unsupported layer type"):
+        Sprite.from_bytes(_document(_chunk(CHUNK_LAYER, bytes(layer.buf))))
+
+
+def test_unknown_loop_direction_is_format_error() -> None:
+    tags = Writer()
+    tags.u16(1)
+    tags.pad(8)
+    tags.u16(0)
+    tags.u16(0)
+    tags.u8(99)
+    tags.u16(0)
+    tags.pad(6)
+    tags.u8(0)
+    tags.u8(0)
+    tags.u8(0)
+    tags.u8(0)
+    tags.string("t")
+    with pytest.raises(FormatError, match="unsupported loop direction"):
+        Sprite.from_bytes(_document(_chunk(CHUNK_TAGS, bytes(tags.buf))))
+
+
+def test_unknown_color_profile_type_is_format_error() -> None:
+    profile = Writer()
+    profile.u16(99)
+    profile.u16(0)
+    profile.u32(0)
+    profile.pad(8)
+    with pytest.raises(FormatError, match="unsupported color profile type"):
+        Sprite.from_bytes(_document(_chunk(CHUNK_COLOR_PROFILE, bytes(profile.buf))))
 
 
 def test_unknown_cel_type_is_format_error() -> None:
