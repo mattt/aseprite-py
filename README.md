@@ -289,9 +289,7 @@ uv run ty check
 uv run pytest
 ```
 
-The default test suite does not need Aseprite installed.
-When `ASEPRITE_PATH` is set and mall-game art is present,
-pytest also compares `flatten()` to `aseprite -b --save-as`.
+The default test suite does not need the Aseprite application.
 
 ## License
 
