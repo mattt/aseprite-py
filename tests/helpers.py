@@ -157,6 +157,55 @@ def tilemap_sprite(
     return sprite
 
 
+def single_tile_sprite(
+    *, tileset_id: int = 0, bits_per_tile: int = 32, shifted_mask: bool = False
+) -> Sprite:
+    """A blank tile followed by a tile with four distinct colors."""
+    sprite = Sprite(2, 2, empty=True)
+    sprite.add_tileset(
+        "tiles",
+        2,
+        2,
+        2,
+        tileset_id=tileset_id,
+        pixels=Pixels(2, 4, bytes(16) + TILE_PIXELS, ColorMode.RGBA),
+    )
+    layer = sprite.add_layer("map", kind=LayerType.TILEMAP, tileset_index=tileset_id)
+    shift = 3 if shifted_mask else 0
+    id_mask = ((1 << (bits_per_tile - 3)) - 1) << shift
+    flip_shift = 0 if shifted_mask else bits_per_tile - 3
+    sprite.add_frame().set_tilemap_cel(
+        layer,
+        Tilemap(
+            1,
+            1,
+            bits_per_tile,
+            id_mask,
+            1 << flip_shift,
+            2 << flip_shift,
+            4 << flip_shift,
+            (1 << shift).to_bytes(bits_per_tile // 8, "little"),
+        ),
+    )
+    return sprite
+
+
+def reference_layer_sprite(mode: ColorMode = ColorMode.RGBA) -> Sprite:
+    sprite = Sprite(1, 1, mode)
+    sprite.palette.extend([Color(0, 0, 0, 0), Color(0, 0, 255), Color(255, 0, 0)])
+    base = sprite.blank_pixels()
+    base[0, 0] = 1 if mode is ColorMode.INDEXED else Color(0, 0, 255)
+    sprite.frames[0][0] = base
+    reference = sprite.add_layer("reference")
+    reference.reference = True
+    top = sprite.blank_pixels()
+    top[0, 0] = 2 if mode is ColorMode.INDEXED else Color(255, 0, 0)
+    sprite.frames[0][reference] = top
+    sprite.add_frame().set_linked_cel(0, 0)
+    sprite.frames[1].set_linked_cel(reference, 0)
+    return sprite
+
+
 def legacy_palette_document(chunk_type: int = 0x000B) -> bytes:
     sprite = Sprite(1, 1, ColorMode.INDEXED)
     sprite.frames[0][0] = Pixels(1, 1, b"\x01", ColorMode.INDEXED)
@@ -173,6 +222,34 @@ def legacy_palette_document(chunk_type: int = 0x000B) -> bytes:
             payload = b"\x01\x00\x00\x02\x00\x00\x00\x3f\x20\x10"
         chunks.append(_chunk(kind, payload))
     return _document(*chunks, depth=8)
+
+
+def rectangular_tile_sprite(
+    width: int, height: int, flips: int, mode: ColorMode = ColorMode.RGBA
+) -> Sprite:
+    sprite = Sprite(3, 3, mode, empty=True)
+    sprite.transparent_index = 2 if mode is ColorMode.INDEXED else 0
+    sprite.palette.extend([Color(255, 0, 0), Color(0, 255, 0), Color(0, 0, 0, 0)])
+    pixels = sprite.blank_pixels(width, height * 2)
+    pixels[0, height] = 0 if mode is ColorMode.INDEXED else Color(255, 0, 0)
+    x, y = (1, height) if width == 2 else (0, height + 1)
+    pixels[x, y] = 1 if mode is ColorMode.INDEXED else Color(0, 255, 0)
+    sprite.add_tileset("tiles", width, height, 2, pixels=pixels)
+    layer = sprite.add_layer("map", kind=LayerType.TILEMAP, tileset_index=0)
+    sprite.add_frame().set_tilemap_cel(
+        layer,
+        Tilemap(
+            1,
+            1,
+            32,
+            0x1FFFFFFF,
+            0x20000000,
+            0x40000000,
+            0x80000000,
+            (1 | (flips << 29)).to_bytes(4, "little"),
+        ),
+    )
+    return sprite
 
 
 def _header(

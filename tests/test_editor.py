@@ -9,6 +9,9 @@ from tests.helpers import (
     blend_sprite,
     indexed_overlap_sprite,
     legacy_palette_document,
+    rectangular_tile_sprite,
+    reference_layer_sprite,
+    single_tile_sprite,
 )
 
 FIXTURE = Path(__file__).parent / "fixtures" / "editor.aseprite"
@@ -145,6 +148,29 @@ def test_group_above_layer_matches_cli(tmp_path: Path) -> None:
 
 
 @needs_cli
+@pytest.mark.parametrize("mode", list(ColorMode))
+def test_reference_layers_match_cli(tmp_path: Path, mode: ColorMode) -> None:
+    sprite = reference_layer_sprite(mode)
+    source = tmp_path / "reference.aseprite"
+    sprite.save(source)
+    for frame in range(2):
+        assert sprite.flatten(frame) == _cli_export(source, tmp_path, frame)
+
+
+@needs_cli
+@pytest.mark.parametrize("tileset_id", [1, 7])
+def test_tileset_ids_match_cli(tmp_path: Path, tileset_id: int) -> None:
+    sprite = single_tile_sprite(tileset_id=tileset_id)
+    sprite.add_tileset("other", 2, 2, 2, tileset_id=0)
+    _assert_flatten_matches_cli(sprite, tmp_path)
+
+
+@needs_cli
+def test_shifted_tile_id_mask_matches_cli(tmp_path: Path) -> None:
+    _assert_flatten_matches_cli(single_tile_sprite(shifted_mask=True), tmp_path)
+
+
+@needs_cli
 def test_legacy_palette_matches_cli_before_and_after_save(tmp_path: Path) -> None:
     source = tmp_path / "legacy.aseprite"
     source.write_bytes(legacy_palette_document())
@@ -153,3 +179,21 @@ def test_legacy_palette_matches_cli_before_and_after_save(tmp_path: Path) -> Non
     assert sprite.flatten() == expected
     sprite.save(source)
     assert _cli_export(source, tmp_path) == expected
+
+
+@needs_cli
+@pytest.mark.parametrize("size", [(2, 1), (1, 2)])
+@pytest.mark.parametrize("flips", range(8))
+def test_rectangular_tile_flips_match_cli(
+    tmp_path: Path, size: tuple[int, int], flips: int
+) -> None:
+    _assert_flatten_matches_cli(rectangular_tile_sprite(*size, flips), tmp_path)
+
+
+@needs_cli
+def test_background_layer_opacity_matches_cli(tmp_path: Path) -> None:
+    sprite = Sprite(1, 1)
+    sprite.layers[0].background = True
+    sprite.layers[0].opacity = 0
+    sprite.frames[0][0] = Pixels(1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA)
+    _assert_flatten_matches_cli(sprite, tmp_path)

@@ -231,7 +231,7 @@ class Sprite:
             kind: Image, group, or tilemap.
             blend_mode: The layer blend mode.
             opacity: Layer opacity from 0 to 255.
-            tileset_index: The tileset referenced by a tilemap layer.
+            tileset_index: The ``Tileset.id`` referenced by a tilemap layer.
 
         Raises:
             ValueError: If ``parent`` is not a group layer.
@@ -329,8 +329,14 @@ class Sprite:
                 Height must be ``tile_height * tile_count``.
                 The default is a transparent image, because Aseprite drops
                 tilemap layers whose tileset has no image.
-            tileset_id: File-format tileset ID. The default is the next index.
+            tileset_id: File-format tileset ID. Defaults to the first unused
+                non-negative ID. Pass this ID as a tilemap layer's ``tileset_index``.
         """
+        if tileset_id is None:
+            used_ids = {tileset.id for tileset in self.tilesets}
+            tileset_id = 0
+            while tileset_id in used_ids:
+                tileset_id += 1
         expected_height = tile_height * tile_count
         if pixels is None:
             pixels = self.blank_pixels(tile_width, expected_height)
@@ -339,7 +345,7 @@ class Sprite:
         _check_color_mode(pixels, self.color_mode, "tileset")
         flags = TILESET_FLAG_EMBEDDED | TILESET_FLAG_EMPTY_IS_ZERO
         tileset = Tileset(
-            id=len(self.tilesets) if tileset_id is None else tileset_id,
+            id=tileset_id,
             name=name,
             tile_count=tile_count,
             tile_width=tile_width,

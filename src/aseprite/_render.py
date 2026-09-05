@@ -139,7 +139,7 @@ def _collect_entries(
         raise ValueError(f"layer group nesting exceeds {MAX_GROUP_DEPTH} levels")
     entries: list[tuple[int, int, Layer, Cel | None]] = []
     for layer in layers:
-        if not layer.visible:
+        if not layer.visible or layer.reference:
             continue
         if layer.kind is LayerType.GROUP:
             if isolate_groups:
@@ -188,7 +188,13 @@ def _composite_group(
     _composite_layers(
         sprite, frame_index, children, child_buf, isolate_groups, scratches, depth + 1
     )
-    _blend_buffer(dest, child_buf, group.opacity, group.blend_mode)
+    _blend_buffer(dest, child_buf, _layer_opacity(sprite, group), group.blend_mode)
+
+
+def _layer_opacity(sprite: Sprite, layer: Layer) -> int:
+    if not sprite.valid_layer_opacity or layer.background:
+        return 255
+    return layer.opacity
 
 
 def _resolve_cel(sprite: Sprite, layer: Layer, frame_index: int) -> Cel | None:
@@ -222,23 +228,29 @@ def _tiles_to_pixels(sprite: Sprite, layer: Layer, cel: Cel) -> Pixels | None:
     tm = cel.tilemap
     if tm is None or layer.tileset_index is None:
         return None
-    if layer.tileset_index >= len(sprite.tilesets):
+    # The layer field stores the file's tileset ID, which need not match
+    # its position in the tileset chunk list.
+    tileset = next((ts for ts in sprite.tilesets if ts.id == layer.tileset_index), None)
+    if tileset is None:
         return None
-    tileset = sprite.tilesets[layer.tileset_index]
     bpp = sprite.color_mode.bytes_per_pixel
     tw, th = tileset.tile_width, tileset.tile_height
-    out_w = (tm.width - 1) * tw + max(tw, th) if tm.width else 0
-    out_h = (tm.height - 1) * th + max(tw, th) if tm.height else 0
+    out_w = tm.width * tw
+    out_h = tm.height * th
     if out_w < 0 or out_h < 0 or out_w * out_h > MAX_PIXELS:
         raise ValueError(f"tilemap exceeds {MAX_PIXELS} pixels")
     if sprite.color_mode is ColorMode.INDEXED:
         # Empty and out-of-range tiles are transparent, which in indexed
         # mode means the transparent index rather than index 0.
         out = bytearray((sprite.transparent_index,)) * (out_w * out_h)
+        empty_pixel = bytes((sprite.transparent_index,))
     else:
         out = bytearray(out_w * out_h * bpp)
+        empty_pixel = bytes(bpp)
     tile_bytes = tw * th * bpp
     stride = bytes_per_tile(tm.bits_per_tile)
+    id_mask = tm.tile_id_mask
+    id_shift = (id_mask & -id_mask).bit_length() - 1 if id_mask else 0
     pixel_data = tileset.pixels.data if tileset.pixels is not None else b""
     for ty in range(tm.height):
         for tx in range(tm.width):
@@ -251,7 +263,7 @@ def _tiles_to_pixels(sprite: Sprite, layer: Layer, cel: Cel) -> Pixels | None:
                 value = struct.unpack_from("<H", tm.tiles, offset)[0]
             else:
                 value = tm.tiles[offset]
-            tile_id = value & tm.tile_id_mask
+            tile_id = (value & id_mask) >> id_shift
             # Aseprite draws tile 0 like any other tile; it is empty only
             # because the editor keeps that tile's image transparent.
             src = tile_id * tile_bytes
@@ -261,7 +273,9 @@ def _tiles_to_pixels(sprite: Sprite, layer: Layer, cel: Cel) -> Pixels | None:
             x_flip = bool(value & tm.x_flip_mask)
             y_flip = bool(value & tm.y_flip_mask)
             d_flip = bool(value & tm.d_flip_mask)
-            tile, fw, fh = _flip_tile(bytes(tile), tw, th, bpp, x_flip, y_flip, d_flip)
+            tile, fw, fh = _flip_tile(
+                bytes(tile), tw, th, bpp, x_flip, y_flip, d_flip, empty_pixel
+            )
             for row in range(fh):
                 dest_y = ty * th + row
                 dest_x = tx * tw
@@ -283,36 +297,32 @@ def _flip_tile(
     x_flip: bool,
     y_flip: bool,
     d_flip: bool,
+    empty_pixel: bytes,
 ) -> tuple[bytes, int, int]:
-    pixels = [
-        data[(y * width + x) * bpp : (y * width + x) * bpp + bpp]
-        for y in range(height)
-        for x in range(width)
-    ]
-
-    def at(x: int, y: int) -> bytes:
-        return pixels[y * width + x]
-
-    w, h = width, height
-    if d_flip:
-        flipped = []
-        for y in range(w):
-            for x in range(h):
-                flipped.append(at(y, x))
-        pixels = flipped
-        w, h = h, w
-    if x_flip:
-        pixels = [pixels[y * w + (w - 1 - x)] for y in range(h) for x in range(w)]
-    if y_flip:
-        pixels = [pixels[(h - 1 - y) * w + x] for y in range(h) for x in range(w)]
-    return b"".join(pixels), w, h
+    if not (x_flip or y_flip or d_flip):
+        return data, width, height
+    out = bytearray(empty_pixel * (width * height))
+    # Aseprite flips inside the original tile footprint. Transposed
+    # coordinates outside a rectangular tile are transparent, not spilled
+    # into the next tile. Invert X/Y flips before looking up the transpose.
+    for y in range(height):
+        for x in range(width):
+            sx = width - 1 - x if x_flip else x
+            sy = height - 1 - y if y_flip else y
+            if d_flip:
+                sx, sy = sy, sx
+            if sx < width and sy < height:
+                src = (sy * width + sx) * bpp
+                dest = (y * width + x) * bpp
+                out[dest : dest + bpp] = data[src : src + bpp]
+    return bytes(out), width, height
 
 
 def _blit_cel(sprite: Sprite, layer: Layer, cel: Cel, dest: bytearray) -> None:
     pixels = _cel_pixels(sprite, layer, cel)
     if pixels is None:
         return
-    opacity = _mul_un8(layer.opacity, cel.opacity)
+    opacity = _mul_un8(_layer_opacity(sprite, layer), cel.opacity)
     # Only visit the part of the cel that lands on the canvas, so the cost
     # is bounded by the canvas size rather than the cel size.
     x0 = max(0, -cel.x)

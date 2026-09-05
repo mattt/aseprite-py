@@ -24,7 +24,10 @@ from tests.helpers import (
     TILE_TR,
     blend_sprite,
     indexed_overlap_sprite,
+    rectangular_tile_sprite,
+    reference_layer_sprite,
     rgba_sprite,
+    single_tile_sprite,
     tilemap_sprite,
 )
 
@@ -41,6 +44,88 @@ def test_flatten_hidden_layer_skipped() -> None:
     sprite.layers[0].visible = False
     data = sprite.flatten(0)
     assert data == b"\x00\x00\x00\x00"
+
+
+@pytest.mark.parametrize("mode", list(ColorMode))
+def test_flatten_reference_layers_skipped(mode: ColorMode) -> None:
+    sprite = reference_layer_sprite(mode)
+    expected = (
+        b"\x00\x00\x00\xff" if mode is ColorMode.GRAYSCALE else b"\x00\x00\xff\xff"
+    )
+    for document in (sprite, Sprite.from_bytes(sprite.to_bytes())):
+        for frame in range(2):
+            assert document.flatten(frame) == expected
+
+
+@pytest.mark.parametrize("background", [False, True])
+@pytest.mark.parametrize("mode", [ColorMode.RGBA, ColorMode.GRAYSCALE])
+def test_flatten_ignores_invalid_layer_opacity(
+    background: bool, mode: ColorMode
+) -> None:
+    sprite = Sprite(1, 1, mode)
+    sprite.layers[0].background = background
+    sprite.valid_layer_opacity = background
+    sprite.layers[0].opacity = 0
+    pixels = sprite.blank_pixels()
+    pixels[0, 0] = Color(255, 255, 255)
+    sprite.frames[0][0] = pixels
+    for document in (sprite, Sprite.from_bytes(sprite.to_bytes())):
+        assert document.flatten() == b"\xff\xff\xff\xff"
+
+
+def test_isolated_group_ignores_invalid_opacity() -> None:
+    sprite = Sprite(1, 1, empty=True)
+    sprite.group_blend = True
+    sprite.valid_layer_opacity = False
+    group = sprite.add_layer("group", kind=LayerType.GROUP, opacity=0)
+    layer = sprite.add_layer("child", parent=group, opacity=0)
+    sprite.add_frame()[layer] = Pixels(1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA)
+    assert sprite.flatten() == b"\xff\x00\x00\xff"
+
+
+@pytest.mark.parametrize("size", [(2, 1), (1, 2)])
+@pytest.mark.parametrize("flips", [4, 5, 6, 7])
+@pytest.mark.parametrize("mode", [ColorMode.RGBA, ColorMode.INDEXED])
+def test_rectangular_diagonal_flip_stays_in_tile(
+    size: tuple[int, int], flips: int, mode: ColorMode
+) -> None:
+    sprite = rectangular_tile_sprite(*size, flips, mode)
+    # Editor output retains the first pixel, mirrored inside the original
+    # tile footprint. The second pixel falls outside that footprint.
+    x = size[0] - 1 if flips & 1 else 0
+    y = size[1] - 1 if flips & 2 else 0
+    expected = bytearray(36)
+    offset = (y * 3 + x) * 4
+    expected[offset : offset + 4] = b"\xff\x00\x00\xff"
+    assert sprite.flatten() == expected
+    assert Sprite.from_bytes(sprite.to_bytes()).flatten() == expected
+
+
+@pytest.mark.parametrize("tileset_id", [1, 7])
+def test_flatten_resolves_tileset_ids(tileset_id: int) -> None:
+    sprite = single_tile_sprite(tileset_id=tileset_id)
+    # ID 1 is initially a valid list position pointing at the wrong image.
+    sprite.add_tileset("other", 2, 2, 2, tileset_id=0)
+    sprite.add_frame().set_linked_cel(0, 0)
+    for _ in range(2):
+        for document in (sprite, Sprite.from_bytes(sprite.to_bytes())):
+            assert document.layers[0].tileset_index == tileset_id
+            for frame in range(2):
+                assert document.flatten(frame) == TILE_PIXELS
+        sprite.tilesets.reverse()
+
+
+def test_flatten_missing_tileset_id_does_not_use_list_position() -> None:
+    sprite = single_tile_sprite(tileset_id=7)
+    sprite.layers[0].tileset_index = 0
+    assert sprite.flatten() == bytes(16)
+
+
+@pytest.mark.parametrize("bits_per_tile", [8, 16, 32])
+def test_flatten_shifted_tile_id_mask(bits_per_tile: int) -> None:
+    sprite = single_tile_sprite(bits_per_tile=bits_per_tile, shifted_mask=True)
+    assert sprite.flatten() == TILE_PIXELS
+    assert Sprite.from_bytes(sprite.to_bytes()).flatten() == TILE_PIXELS
 
 
 def test_flatten_linked_cel() -> None:
@@ -268,7 +353,7 @@ def test_flatten_tilemap_d_flip_nonsquare() -> None:
     data = sprite.flatten(0)
     assert data[0:4] == TILE_TL
     assert data[4:8] == b"\x00\x00\x00\x00"
-    assert data[8:12] == TILE_TR
+    assert data[8:12] == b"\x00\x00\x00\x00"
     assert data[12:16] == b"\x00\x00\x00\x00"
 
 

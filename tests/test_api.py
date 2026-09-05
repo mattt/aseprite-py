@@ -411,6 +411,15 @@ def test_add_tileset_with_pixels_roundtrips() -> None:
     assert loaded.tilesets[0].pixels.height == 8
 
 
+def test_add_tileset_default_id_avoids_custom_ids() -> None:
+    sprite = Sprite(1, 1)
+    custom = sprite.add_tileset("custom", 1, 1, 1, tileset_id=1)
+    first = sprite.add_tileset("first", 1, 1, 1)
+    second = sprite.add_tileset("second", 1, 1, 1)
+    assert [custom.id, first.id, second.id] == [1, 0, 2]
+    assert [t.id for t in Sprite.from_bytes(sprite.to_bytes()).tilesets] == [1, 0, 2]
+
+
 def test_add_tileset_rejects_mismatched_pixels() -> None:
     sprite = Sprite(8, 8)
     with pytest.raises(ValueError, match="tile dimensions"):
