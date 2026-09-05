@@ -112,6 +112,7 @@ def read_sprite(data: bytes) -> Sprite:
     except ValueError as exc:
         raise FormatError(str(exc)) from exc
     budget = DocumentBudget(MAX_UNCOMPRESSED_BYTES)
+    sprite.color_profile = None
     sprite.valid_layer_opacity = bool(flags & HEADER_FLAG_LAYER_OPACITY)
     sprite.group_blend = bool(flags & HEADER_FLAG_GROUP_BLEND)
     sprite.deprecated_speed = speed

@@ -359,6 +359,15 @@ def test_tag_color_and_ping_pong() -> None:
     assert loaded.tags["ppr"].direction is LoopDirection.PING_PONG_REVERSE
 
 
+def test_missing_color_profile_stays_none() -> None:
+    sprite = Sprite(1, 1)
+    sprite.color_profile = None
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    assert loaded.color_profile is None
+    assert loaded == sprite
+    assert Sprite.from_bytes(Sprite(1, 1).to_bytes()).color_profile == ColorProfile()
+
+
 def test_header_grid_and_color_profile() -> None:
     sprite = rgba_sprite()
     sprite.grid = Grid(1, 2, 8, 8)
