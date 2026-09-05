@@ -455,7 +455,11 @@ class CelExtra:
 
 @dataclass(slots=True)
 class Tilemap:
-    """Compressed-tilemap cel payload."""
+    """Compressed-tilemap cel payload.
+
+    Aseprite 1.3 reads only tilemaps with 32 bits per tile. Other widths
+    are valid in the file format but the editor drops those cels.
+    """
 
     width: int
     height: int

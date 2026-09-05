@@ -105,7 +105,8 @@ def write_sprite(sprite: Sprite) -> bytes:
                     CHUNK_TILESET,
                     lambda iw, t=tileset: _write_tileset(iw, t, sprite.color_mode),
                 )
-                if tileset.user_data or any(tileset.tile_user_data):
+                embedded = bool(tileset.flags & TILESET_FLAG_EMBEDDED)
+                if embedded or tileset.user_data or any(tileset.tile_user_data):
                     emit_built(
                         CHUNK_USER_DATA,
                         lambda iw, t=tileset: write_user_data(
@@ -117,6 +118,10 @@ def write_sprite(sprite: Sprite) -> bytes:
                         uds.pop()
                     if len(uds) > tileset.tile_count:
                         uds = uds[: tileset.tile_count]
+                    if embedded:
+                        # Aseprite expects one user-data chunk per tile after
+                        # the tileset's own chunk and warns when they are absent.
+                        uds.extend([None] * (tileset.tile_count - len(uds)))
                     for tile_ud in uds:
                         emit_built(
                             CHUNK_USER_DATA,

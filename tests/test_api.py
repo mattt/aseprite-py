@@ -363,6 +363,21 @@ def test_frame_missing_cel() -> None:
         sprite.frames[0][99]
 
 
+def test_embedded_tileset_writes_a_user_data_chunk_per_tile() -> None:
+    from aseprite._reader import CHUNK_TILESET, CHUNK_USER_DATA
+    from tests.helpers import chunk_types
+
+    sprite = Sprite(8, 8)
+    sprite.add_tileset("tiles", 8, 8, 3)
+    types = chunk_types(sprite.to_bytes())
+    at = types.index(CHUNK_TILESET)
+    assert types[at + 1 : at + 5] == [CHUNK_USER_DATA] * 4
+    assert types[at + 5] != CHUNK_USER_DATA
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    assert loaded.tilesets[0].tile_user_data == []
+    assert loaded == sprite
+
+
 def test_add_tileset_without_pixels_embeds_blank_image() -> None:
     sprite = Sprite(8, 8)
     sprite.add_tileset("tiles", 8, 8, 2)

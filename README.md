@@ -306,6 +306,7 @@ and written back unchanged.
 
 Aseprite treats tile 0 of every tileset as the empty tile.
 Leave it blank when you build a tileset with `add_tileset`.
+Aseprite 1.3 reads only tilemaps with 32 bits per tile.
 
 ## Development
 
