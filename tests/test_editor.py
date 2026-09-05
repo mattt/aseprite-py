@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from aseprite import ColorMode, LayerType, Pixels, Sprite
+from aseprite import Color, ColorMode, LayerType, Palette, Pixels, Sprite
 from tests.helpers import aseprite_cli, blend_sprite, indexed_overlap_sprite
 
 FIXTURE = Path(__file__).parent / "fixtures" / "editor.aseprite"
@@ -13,8 +13,8 @@ needs_cli = pytest.mark.skipif(
 )
 
 
-def _cli_export(source: Path, tmp_path: Path) -> bytes:
-    """Returns the RGBA bytes Aseprite exports for frame 0 of ``source``."""
+def _cli_export(source: Path, tmp_path: Path, frame: int = 0) -> bytes:
+    """Returns the RGBA bytes Aseprite exports for a frame of ``source``."""
     executable = aseprite_cli()
     assert executable is not None
     dest = tmp_path / "expected.png"
@@ -23,7 +23,7 @@ def _cli_export(source: Path, tmp_path: Path) -> bytes:
             executable,
             "-b",
             "--frame-range",
-            "0,0",
+            f"{frame},{frame}",
             str(source),
             "--save-as",
             str(dest),
@@ -34,6 +34,32 @@ def _cli_export(source: Path, tmp_path: Path) -> bytes:
     from PIL import Image
 
     return Image.open(dest).convert("RGBA").tobytes()
+
+
+@needs_cli
+def test_linked_placement_and_opacity_matches_cli(tmp_path: Path) -> None:
+    sprite = Sprite(3, 2)
+    layer = sprite.layers[0]
+    sprite.frames[0].set_cel(
+        layer, Pixels(1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA), opacity=50
+    )
+    sprite.add_frame().set_linked_cel(layer, 0, x=2, y=1, opacity=128)
+    source = tmp_path / "linked.aseprite"
+    sprite.save(source)
+    assert sprite.flatten(1) == _cli_export(source, tmp_path, 1)
+
+
+@needs_cli
+def test_palette_animation_matches_cli(tmp_path: Path) -> None:
+    sprite = Sprite(1, 1, ColorMode.INDEXED)
+    sprite.palette = Palette([Color(0, 0, 0, 0), Color(255, 0, 0)])
+    sprite.frames[0][0] = Pixels(1, 1, b"\x01", ColorMode.INDEXED)
+    sprite.add_frame().set_linked_cel(0, 0)
+    sprite.frames[1].palette = Palette([Color(0, 0, 0, 0), Color(0, 0, 255)])
+    source = tmp_path / "palette.aseprite"
+    sprite.save(source)
+    for frame in range(2):
+        assert sprite.flatten(frame) == _cli_export(source, tmp_path, frame)
 
 
 def _assert_flatten_matches_cli(sprite: Sprite, tmp_path: Path) -> None:

@@ -219,6 +219,12 @@ pixels[2, 3] = 1
 sprite.frames[0][sprite.layers[0]] = pixels
 ```
 
+Palettes can change during an animation. `sprite.palette` is the initial
+palette. Set `frame.palette` to a `Palette` to replace it from that frame
+onward; `None` inherits the previous palette. `sprite.palette_at(frame)`
+returns the effective palette. Palette changes, including partial updates
+in existing files, are preserved when reading, rendering, and saving.
+
 ### Slices and user data
 
 A slice is a named rectangle.

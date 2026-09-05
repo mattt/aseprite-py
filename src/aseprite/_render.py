@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import struct
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from aseprite._limits import (
@@ -17,6 +18,7 @@ from aseprite._model import (
     ColorMode,
     Layer,
     LayerType,
+    Palette,
     Pixels,
 )
 
@@ -74,12 +76,12 @@ def _flatten_indexed(sprite: Sprite, frame_index: int, layers: list[Layer]) -> b
                     continue
                 indices[dest_row + px] = index
                 painted[dest_row + px] = 0xFF
-    return _apply_palette(sprite, indices, painted)
+    return _apply_palette(sprite.palette_at(frame_index), indices, painted)
 
 
-def _apply_palette(sprite: Sprite, indices: bytearray, painted: bytearray) -> bytes:
+def _apply_palette(colors: Palette, indices: bytearray, painted: bytearray) -> bytes:
     """Maps palette indices to RGBA bytes without a per-pixel Python loop."""
-    palette = sprite.palette.colors
+    palette = colors.colors
     tables = []
     for channel in range(4):
         table = bytearray(256)
@@ -190,6 +192,7 @@ def _composite_group(
 
 
 def _resolve_cel(sprite: Sprite, layer: Layer, frame_index: int) -> Cel | None:
+    original = sprite.frames[frame_index].cel(layer)
     seen: set[int] = set()
     current = frame_index
     while current not in seen:
@@ -200,7 +203,9 @@ def _resolve_cel(sprite: Sprite, layer: Layer, frame_index: int) -> Cel | None:
         if cel is None:
             return None
         if cel.link is None:
-            return cel
+            if original is None or original is cel:
+                return cel
+            return replace(original, pixels=cel.pixels, tilemap=cel.tilemap, link=None)
         current = cel.link
     return None
 

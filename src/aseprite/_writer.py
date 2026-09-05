@@ -89,11 +89,13 @@ def write_sprite(sprite: Sprite) -> bytes:
                 emit_built(
                     CHUNK_EXTERNAL_FILES, lambda iw: _write_external_files(iw, sprite)
                 )
-            emit_built(CHUNK_PALETTE, lambda iw: _write_palette(iw, sprite.palette))
+            emit_built(
+                CHUNK_PALETTE, lambda iw: _write_palette(iw, sprite.palette_at(0))
+            )
             if _should_write_old_palette(sprite):
                 emit_built(
                     CHUNK_OLD_PALETTE_4,
-                    lambda iw: _write_old_palette(iw, sprite.palette),
+                    lambda iw: _write_old_palette(iw, sprite.palette_at(0)),
                 )
             sprite_ud = sprite.user_data
             if sprite_ud:
@@ -137,6 +139,14 @@ def write_sprite(sprite: Sprite) -> bytes:
                         CHUNK_USER_DATA,
                         lambda iw, u=layer_ud: write_user_data(iw, u),
                     )
+
+        if frame_index > 0 and frame.palette is not None:
+            emit_built(
+                CHUNK_PALETTE,
+                lambda iw, index=frame_index: _write_palette(
+                    iw, sprite.palette_at(index)
+                ),
+            )
 
         for cel in frame.cels:
             emit_built(
@@ -204,7 +214,7 @@ def _write_header(w: Writer, sprite: Sprite, file_size: int) -> None:
     w.pad(8)
     w.u8(sprite.transparent_index)
     w.pad(3)
-    ncolors = len(sprite.palette) or sprite.num_colors or 0
+    ncolors = len(sprite.palette_at(0)) or sprite.num_colors or 0
     if ncolors > MAX_PALETTE_COLORS:
         raise ValueError(f"palette size exceeds {MAX_PALETTE_COLORS}")
     w.u16(ncolors)

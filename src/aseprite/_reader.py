@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import zlib
+from dataclasses import replace
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -130,10 +131,13 @@ def read_sprite(data: bytes) -> Sprite:
     tileset_tile_index = -1
     last_layer: Layer | None = None
     last_slice: Slice | None = None
-    saw_palette = False
+    current_palette = sprite.palette
     sprite_ud_pending = False
 
     for frame_index in range(nframes):
+        previous_palette = current_palette
+        old_palette = current_palette
+        saw_palette = False
         if pos + FRAME_HEADER_SIZE > len(data):
             raise FormatError("truncated frame header")
         frame_r = Reader(data, pos, pos + FRAME_HEADER_SIZE)
@@ -171,14 +175,18 @@ def read_sprite(data: bytes) -> Sprite:
 
             if chunk_type == CHUNK_OLD_PALETTE_4:
                 if not saw_palette:
-                    sprite.palette = _read_old_palette(payload, scale=1)
+                    old_palette = _read_old_palette(
+                        payload, scale=1, previous=old_palette
+                    )
                 sprite._had_old_palette_4 = True
             elif chunk_type == CHUNK_OLD_PALETTE_11:
                 if not saw_palette:
-                    sprite.palette = _read_old_palette(payload, scale=4)
+                    old_palette = _read_old_palette(
+                        payload, scale=4, previous=old_palette
+                    )
                 sprite._had_old_palette_11 = True
             elif chunk_type == CHUNK_PALETTE:
-                sprite.palette = _read_palette(payload)
+                current_palette = _read_palette(payload, current_palette)
                 saw_palette = True
                 if frame_index == 0:
                     sprite_ud_pending = True
@@ -289,6 +297,12 @@ def read_sprite(data: bytes) -> Sprite:
                 )
 
             chunk_pos += chunk_size
+        if not saw_palette:
+            current_palette = old_palette
+        if frame_index == 0:
+            sprite.palette = current_palette
+        elif current_palette != previous_palette:
+            frame.palette = current_palette
         pos = frame_end
 
     for tileset in sprite.tilesets:
@@ -301,9 +315,9 @@ def read_sprite(data: bytes) -> Sprite:
     return sprite
 
 
-def _read_old_palette(r: Reader, scale: int) -> Palette:
+def _read_old_palette(r: Reader, scale: int, previous: Palette) -> Palette:
     packets = r.u16()
-    colors = [Color(0, 0, 0, 255) for _ in range(256)]
+    colors = [replace(color) for color in previous]
     index = 0
     for _ in range(packets):
         skip = r.u8()
@@ -315,15 +329,14 @@ def _read_old_palette(r: Reader, scale: int) -> Palette:
             blue = min(r.u8() * scale, 255)
             if index >= MAX_PALETTE_COLORS:
                 raise FormatError(f"palette size exceeds {MAX_PALETTE_COLORS}")
-            if index < len(colors):
-                colors[index] = Color(red, green, blue, 255)
-            else:
-                colors.append(Color(red, green, blue, 255))
+            while len(colors) <= index:
+                colors.append(Color(0, 0, 0, 255))
+            colors[index] = Color(red, green, blue, 255)
             index += 1
-    return Palette(colors[:index] if index else colors)
+    return Palette(colors)
 
 
-def _read_palette(r: Reader) -> Palette:
+def _read_palette(r: Reader, previous: Palette) -> Palette:
     size = r.u32()
     first = r.u32()
     last = r.u32()
@@ -334,7 +347,8 @@ def _read_palette(r: Reader) -> Palette:
         return Palette()
     if first > last or last >= size:
         raise FormatError("palette index range is invalid")
-    colors = [Color(0, 0, 0, 0) for _ in range(size)]
+    colors = [replace(color) for color in previous.colors[:size]]
+    colors.extend(Color(0, 0, 0, 0) for _ in range(size - len(colors)))
     for index in range(first, last + 1):
         flags = r.u16()
         entry = Color(r.u8(), r.u8(), r.u8(), r.u8())

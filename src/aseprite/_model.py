@@ -491,10 +491,15 @@ class Cel:
 
 @dataclass(slots=True)
 class Frame:
-    """One animation frame."""
+    """One animation frame.
+
+    ``palette`` optionally replaces the palette from this frame onward.
+    ``None`` inherits the previous palette, initially ``Sprite.palette``.
+    """
 
     duration_ms: int = 100
     _cels: dict[int, Cel] = field(default_factory=dict, compare=True)
+    palette: Palette | None = None
 
     @property
     def cels(self) -> list[Cel]:
@@ -736,6 +741,11 @@ class LayerList(_NamedList[Layer]):
         self._prev = list(self._items)
         if self._on_remap is not None and previous_len:
             self._on_remap(mapping)
+
+    def reverse(self) -> None:
+        """Reverses layer order while preserving every layer's cels."""
+        self._items.reverse()
+        self._after_mutate()
 
     def children(self, group: Layer) -> list[Layer]:
         """Returns the direct child layers of a group."""

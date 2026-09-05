@@ -350,6 +350,20 @@ class Sprite:
         self.tilesets.append(tileset)
         return tileset
 
+    def palette_at(self, frame: int = 0) -> Palette:
+        """Returns the palette effective at a frame, including earlier changes.
+
+        ``palette`` is the initial palette. A frame's optional ``palette``
+        replaces it from that frame onward.
+        """
+        if frame < 0 or frame >= len(self.frames):
+            raise IndexError(f"frame {frame} is out of range")
+        for index in range(frame, -1, -1):
+            palette = self.frames[index].palette
+            if palette is not None:
+                return palette
+        return self.palette
+
     def flatten(self, frame: int = 0) -> bytes:
         """Composites the given frame and returns RGBA8 bytes.
 
