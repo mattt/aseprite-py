@@ -46,12 +46,18 @@ dev = [
 ]
 
 [tool.ruff]
-src = ["src", "tests", "examples"]
+src = ["src", "."]
 target-version = "py312"
 line-length = 88
+# Honor exclusions for files opened directly in an editor, too.
+force-exclude = true
+# Generated output and Python interpreter sources are not project code.
+extend-exclude = ["build", "python3.[0-9]*", "Lib"]
 
 [tool.ruff.lint]
+# Keep rule selection here so editors and CI enforce the same conventions.
 select = ["E", "F", "I", "UP", "B", "S"]
+# The formatter handles wrapping where it can; prose and URLs may run longer.
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
@@ -64,6 +70,7 @@ quote-style = "double"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = ["-ra", "--strict-config", "--strict-markers"]
 
 [tool.coverage.run]
 source = ["aseprite"]
@@ -71,3 +78,8 @@ source = ["aseprite"]
 [tool.ty.environment]
 root = ["./src"]
 extra-paths = ["."]
+
+[tool.ty.src]
+include = ["src", "tests", "examples"]
+# These scripts use the local package and belong in the normal checks.
+exclude-scripts = false

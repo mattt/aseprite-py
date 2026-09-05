@@ -200,6 +200,12 @@ uv run ty check
 uv run pytest
 ```
 
+In VS Code, install the recommended workspace extensions and select the
+`.venv` interpreter. Workspace settings use Ruff for linting and formatting,
+ty for type checking, and pytest for test discovery, with rules kept in
+`pyproject.toml`. Python files are formatted and safe Ruff fixes are applied
+when you save.
+
 The tests use [Hypothesis][hypothesis] for generated documents and include
 regression cases for reading, writing, rendering, and editing.
 Set `HYPOTHESIS_PROFILE=long` for an extended search.
