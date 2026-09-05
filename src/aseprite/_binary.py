@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import struct
-from typing import Self
 
 from aseprite._errors import FormatError
 
@@ -22,6 +21,8 @@ class Reader:
         self.data = data
         self.pos = pos
         self.end = len(data) if end is None else end
+        if pos < 0 or pos > self.end or self.end > len(data):
+            raise FormatError("unexpected end of Aseprite data")
 
     def remaining(self) -> int:
         return self.end - self.pos
@@ -80,12 +81,6 @@ class Reader:
 
     def uuid(self) -> bytes:
         return self.raw(16)
-
-    def bounded(self, size: int) -> Self:
-        self._need(size)
-        start = self.pos
-        self.pos += size
-        return type(self)(self.data, start, start + size)
 
 
 class Writer:

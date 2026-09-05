@@ -1,4 +1,5 @@
 import zlib
+from pathlib import Path
 
 import pytest
 
@@ -57,6 +58,27 @@ def test_bad_depth() -> None:
 def test_truncated_frame() -> None:
     with pytest.raises(FormatError):
         Sprite.from_bytes(bytes(_header()))
+
+
+def test_every_truncation_is_format_error() -> None:
+    data = (Path(__file__).parent / "fixtures" / "editor.aseprite").read_bytes()
+    for length in range(len(data)):
+        with pytest.raises(FormatError):
+            Sprite.from_bytes(data[:length])
+
+
+def test_chunk_past_end_of_data_is_format_error() -> None:
+    header = _header()
+    frame = bytearray(FRAME_HEADER_SIZE + CHUNK_HEADER_SIZE + 2)
+    frame[0:4] = (FRAME_HEADER_SIZE + 64).to_bytes(4, "little")
+    frame[4:6] = FRAME_MAGIC.to_bytes(2, "little")
+    frame[6:8] = (1).to_bytes(2, "little")
+    frame[8:10] = (100).to_bytes(2, "little")
+    frame[16:20] = (CHUNK_HEADER_SIZE + 16).to_bytes(4, "little")
+    frame[20:22] = CHUNK_COLOR_PROFILE.to_bytes(2, "little")
+    header[0:4] = (HEADER_SIZE + len(frame)).to_bytes(4, "little")
+    with pytest.raises(FormatError, match="unexpected end"):
+        Sprite.from_bytes(bytes(header) + bytes(frame))
 
 
 def test_chunk_exceeds_frame() -> None:

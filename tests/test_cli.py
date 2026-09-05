@@ -62,6 +62,16 @@ def test_info_corrupt_file(tmp_path) -> None:  # noqa: ANN001
     assert main(["info", str(path)]) == 1
 
 
+def test_info_truncated_file(tmp_path, capsys) -> None:  # noqa: ANN001
+    path = tmp_path / "cut.aseprite"
+    sprite = rgba_sprite()
+    sprite.add_tag("idle", 0, 0)
+    data = sprite.to_bytes()
+    path.write_bytes(data[: len(data) - 40])
+    assert main(["info", str(path)]) == 1
+    assert "error:" in capsys.readouterr().err
+
+
 def test_info_nested_group_indent(tmp_path, capsys) -> None:  # noqa: ANN001
     path = tmp_path / "n.aseprite"
     sprite = Sprite(1, 1, empty=True)

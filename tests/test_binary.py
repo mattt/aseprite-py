@@ -35,11 +35,13 @@ def test_roundtrip_primitives() -> None:
     assert r.remaining() == 0
 
 
-def test_bounded_reader() -> None:
-    r = Reader(b"abcdef")
-    inner = r.bounded(3)
-    assert inner.raw(3) == b"abc"
-    assert r.raw(3) == b"def"
+def test_reader_rejects_bounds_past_data() -> None:
+    with pytest.raises(FormatError):
+        Reader(b"abc", 0, 4)
+    with pytest.raises(FormatError):
+        Reader(b"abc", 4)
+    with pytest.raises(FormatError):
+        Reader(b"abc", 2, 1)
 
 
 def test_short_read_raises() -> None:
