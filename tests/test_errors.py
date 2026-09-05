@@ -5,8 +5,10 @@ import pytest
 
 from aseprite import (
     AsepriteError,
+    BlendMode,
     Cel,
     ColorMode,
+    ExternalFileType,
     FormatError,
     Pixels,
     Sprite,
@@ -171,7 +173,7 @@ def test_short_cel_pixels_is_format_error() -> None:
         )
 
 
-def test_unknown_blend_mode_is_format_error() -> None:
+def test_unknown_blend_mode_is_preserved() -> None:
     layer = Writer()
     layer.u16(3)
     layer.u16(0)
@@ -182,8 +184,18 @@ def test_unknown_blend_mode_is_format_error() -> None:
     layer.u8(255)
     layer.pad(3)
     layer.string("L")
-    with pytest.raises(FormatError, match="unsupported blend mode"):
-        Sprite.from_bytes(_document(_chunk(CHUNK_LAYER, bytes(layer.buf))))
+    cel = _raw_cel_payload(pixels=b"\xff\x00\x00\xff")
+    sprite = Sprite.from_bytes(
+        _document(_chunk(CHUNK_LAYER, bytes(layer.buf)), _chunk(CHUNK_CEL, cel))
+    )
+    mode = sprite.layers[0].blend_mode
+    assert mode == 99
+    assert isinstance(mode, BlendMode)
+    assert mode.name == "UNKNOWN_99"
+    assert mode is not BlendMode.NORMAL
+    assert sprite.flatten(0) == b"\xff\x00\x00\xff"
+    again = Sprite.from_bytes(sprite.to_bytes())
+    assert again.layers[0].blend_mode == 99
 
 
 def test_unknown_layer_type_is_format_error() -> None:
@@ -201,7 +213,7 @@ def test_unknown_layer_type_is_format_error() -> None:
         Sprite.from_bytes(_document(_chunk(CHUNK_LAYER, bytes(layer.buf))))
 
 
-def test_unknown_loop_direction_is_format_error() -> None:
+def test_unknown_loop_direction_is_preserved() -> None:
     tags = Writer()
     tags.u16(1)
     tags.pad(8)
@@ -215,18 +227,36 @@ def test_unknown_loop_direction_is_format_error() -> None:
     tags.u8(0)
     tags.u8(0)
     tags.string("t")
-    with pytest.raises(FormatError, match="unsupported loop direction"):
-        Sprite.from_bytes(_document(_chunk(CHUNK_TAGS, bytes(tags.buf))))
+    sprite = Sprite.from_bytes(_document(_chunk(CHUNK_TAGS, bytes(tags.buf))))
+    assert sprite.tags[0].direction == 99
+    assert sprite.tags[0].direction.name == "UNKNOWN_99"
+    again = Sprite.from_bytes(sprite.to_bytes())
+    assert again.tags[0].direction == 99
 
 
-def test_unknown_color_profile_type_is_format_error() -> None:
+def test_unknown_color_profile_type_is_preserved() -> None:
     profile = Writer()
     profile.u16(99)
     profile.u16(0)
     profile.u32(0)
     profile.pad(8)
-    with pytest.raises(FormatError, match="unsupported color profile type"):
-        Sprite.from_bytes(_document(_chunk(CHUNK_COLOR_PROFILE, bytes(profile.buf))))
+    sprite = Sprite.from_bytes(
+        _document(_chunk(CHUNK_COLOR_PROFILE, bytes(profile.buf)))
+    )
+    assert sprite.color_profile is not None
+    assert sprite.color_profile.kind == 99
+    again = Sprite.from_bytes(sprite.to_bytes())
+    assert again.color_profile is not None
+    assert again.color_profile.kind == 99
+
+
+def test_open_enum_rejects_non_integers() -> None:
+    assert ExternalFileType(99).name == "UNKNOWN_99"
+    assert ExternalFileType(1) is ExternalFileType.TILESET
+    with pytest.raises(ValueError):
+        ExternalFileType(-1)
+    with pytest.raises(ValueError):
+        ExternalFileType("palette")  # type: ignore[arg-type]
 
 
 def test_unknown_cel_type_is_format_error() -> None:

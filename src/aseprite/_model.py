@@ -5,8 +5,26 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Iterator, MutableSequence, Sequence
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
-from typing import Protocol, cast, overload
+from typing import Protocol, Self, cast, overload
 from uuid import UUID
+
+
+class _OpenIntEnum(IntEnum):
+    """An ``IntEnum`` that keeps values this library does not know about.
+
+    Newer Aseprite versions may add members. An unknown value is preserved
+    as an ``UNKNOWN_<value>`` pseudo-member so the file still opens and
+    writes back unchanged.
+    """
+
+    @classmethod
+    def _missing_(cls, value: object) -> Self | None:
+        if not isinstance(value, int) or value < 0:
+            return None
+        member = int.__new__(cls, value)
+        member._name_ = f"UNKNOWN_{value}"
+        member._value_ = value
+        return member
 
 
 class ColorMode(IntEnum):
@@ -22,7 +40,7 @@ class ColorMode(IntEnum):
         return {ColorMode.RGBA: 4, ColorMode.GRAYSCALE: 2, ColorMode.INDEXED: 1}[self]
 
 
-class BlendMode(IntEnum):
+class BlendMode(_OpenIntEnum):
     """A layer blend mode from the Aseprite spec."""
 
     NORMAL = 0
@@ -63,7 +81,7 @@ class CelType(IntEnum):
     COMPRESSED_TILEMAP = 3
 
 
-class LoopDirection(IntEnum):
+class LoopDirection(_OpenIntEnum):
     """How an animation tag plays."""
 
     FORWARD = 0
@@ -72,7 +90,7 @@ class LoopDirection(IntEnum):
     PING_PONG_REVERSE = 3
 
 
-class ColorProfileType(IntEnum):
+class ColorProfileType(_OpenIntEnum):
     """The kind of color profile stored in the file."""
 
     NONE = 0
@@ -80,7 +98,7 @@ class ColorProfileType(IntEnum):
     ICC = 2
 
 
-class ExternalFileType(IntEnum):
+class ExternalFileType(_OpenIntEnum):
     """The kind of an external file reference."""
 
     PALETTE = 0

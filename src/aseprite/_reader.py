@@ -300,13 +300,6 @@ def read_sprite(data: bytes) -> Sprite:
     return sprite
 
 
-def _enum(enum_cls, value: int, label: str):  # noqa: ANN001
-    try:
-        return enum_cls(value)
-    except ValueError as exc:
-        raise FormatError(f"unsupported {label} {value}") from exc
-
-
 def _read_old_palette(r: Reader, scale: int) -> Palette:
     packets = r.u16()
     colors = [Color(0, 0, 0, 255) for _ in range(256)]
@@ -360,7 +353,7 @@ def _read_layer(r: Reader, has_uuid: bool) -> Layer:
         raise FormatError(f"unsupported layer type {kind_value}") from exc
     child_level = r.u16()
     r.skip(4)
-    blend = _enum(BlendMode, r.u16(), "blend mode")
+    blend = BlendMode(r.u16())
     opacity = r.u8()
     r.skip(3)
     name = r.string()
@@ -474,7 +467,7 @@ def _read_cel_extra(r: Reader) -> CelExtra:
 
 
 def _read_color_profile(r: Reader) -> ColorProfile:
-    ptype = _enum(ColorProfileType, r.u16(), "color profile type")
+    ptype = ColorProfileType(r.u16())
     flags = r.u16()
     gamma = r.u32()
     r.skip(8)
@@ -496,7 +489,7 @@ def _read_external_files(r: Reader) -> list[ExternalFile]:
     files: list[ExternalFile] = []
     for _ in range(count):
         entry_id = r.u32()
-        ftype = _enum(ExternalFileType, r.u8(), "external file type")
+        ftype = ExternalFileType(r.u8())
         r.skip(7)
         name = r.string()
         files.append(ExternalFile(id=entry_id, kind=ftype, name=name))
@@ -522,7 +515,7 @@ def _read_tags(r: Reader) -> list[Tag]:
     for _ in range(count):
         frm = r.u16()
         to = r.u16()
-        direction = _enum(LoopDirection, r.u8(), "loop direction")
+        direction = LoopDirection(r.u8())
         repeat = r.u16()
         r.skip(6)
         color = (r.u8(), r.u8(), r.u8())
