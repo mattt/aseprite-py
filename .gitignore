@@ -15,3 +15,4 @@ wheels/
 .ty_cache/
 .coverage
 htmlcov/
+.hypothesis/

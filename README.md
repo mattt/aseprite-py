@@ -320,6 +320,13 @@ uv run ty check
 uv run pytest
 ```
 
+Property-based tests in `tests/test_properties.py` use [Hypothesis][hypothesis].
+They build random documents from every chunk type,
+check that a write and read leaves them unchanged,
+and check that corrupt bytes fail with `FormatError`.
+They run a small number of examples by default.
+Set `HYPOTHESIS_PROFILE=long` for an extended search.
+
 
 The default test suite does not need the Aseprite application.
 If the editor is present, one test compares `flatten()` to a CLI PNG export.
@@ -343,3 +350,4 @@ Mattt ([@mattt](https://twitter.com/mattt))
 [aseprite]: https://www.aseprite.org
 [spec]: https://github.com/aseprite/aseprite/blob/main/docs/ase-file-specs.md
 [aseprite-mcp]: https://github.com/mattt/aseprite-mcp
+[hypothesis]: https://hypothesis.readthedocs.io
