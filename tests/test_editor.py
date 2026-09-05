@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 
 from aseprite import Color, ColorMode, LayerType, Palette, Pixels, Sprite
-from tests.helpers import aseprite_cli, blend_sprite, indexed_overlap_sprite
+from tests.helpers import (
+    aseprite_cli,
+    blend_sprite,
+    indexed_overlap_sprite,
+    legacy_palette_document,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "editor.aseprite"
 
@@ -137,3 +142,14 @@ def test_group_above_layer_matches_cli(tmp_path: Path) -> None:
     top[0, 0] = (10, 220, 30, 255)
     sprite.frames[0].set_cel(child, top, 1, 1)
     _assert_flatten_matches_cli(sprite, tmp_path)
+
+
+@needs_cli
+def test_legacy_palette_matches_cli_before_and_after_save(tmp_path: Path) -> None:
+    source = tmp_path / "legacy.aseprite"
+    source.write_bytes(legacy_palette_document())
+    expected = _cli_export(source, tmp_path)
+    sprite = Sprite.open(source)
+    assert sprite.flatten() == expected
+    sprite.save(source)
+    assert _cli_export(source, tmp_path) == expected

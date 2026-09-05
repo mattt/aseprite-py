@@ -2,8 +2,8 @@ import struct
 
 import pytest
 
-from aseprite import Color, ColorMode, Palette, Pixels, Sprite
-from tests.helpers import _chunk, _document, tilemap_sprite
+from aseprite import Color, ColorMode, FormatError, Palette, Pixels, Sprite
+from tests.helpers import _chunk, _document, legacy_palette_document, tilemap_sprite
 
 
 def test_reverse_preserves_cels_across_frames() -> None:
@@ -129,3 +129,37 @@ def test_create_palette_animation() -> None:
     ]
     with pytest.raises(IndexError):
         sprite.palette_at(-1)
+
+
+@pytest.mark.parametrize("old", [False, True])
+def test_palette_allocation_budget_spans_frames(
+    old: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("aseprite._limits.MAX_TOTAL_PALETTE_COLORS", 8)
+    frames = []
+    for i in range(3):
+        if old:
+            chunk = _chunk(0x0004, struct.pack("<HBB3B", 1, 3, 1, i, 0, 0))
+        else:
+            chunk = _chunk(0x2019, struct.pack("<III8xH4B", 4, 3, 3, 0, i, 0, 0, 255))
+        frames.append(_document(chunk)[128:])
+
+    def document(count: int) -> bytes:
+        data = bytearray(_document()[:128] + b"".join(frames[:count]))
+        struct.pack_into("<I", data, 0, len(data))
+        struct.pack_into("<H", data, 6, count)
+        return bytes(data)
+
+    assert len(Sprite.from_bytes(document(2)).frames) == 2
+    with pytest.raises(FormatError, match="palette allocation"):
+        Sprite.from_bytes(document(3))
+    # Budgets belong to one read, not to the process.
+    assert len(Sprite.from_bytes(document(2)).frames) == 2
+
+
+@pytest.mark.parametrize("kind", [0x000B, 0x0011])
+def test_legacy_six_bit_palette_roundtrip(kind: int) -> None:
+    sprite = Sprite.from_bytes(legacy_palette_document(kind))
+    assert sprite.palette[1] == Color(255, 130, 65)
+    assert sprite.flatten() == b"\xff\x82\x41\xff"
+    assert Sprite.from_bytes(sprite.to_bytes()).flatten() == sprite.flatten()

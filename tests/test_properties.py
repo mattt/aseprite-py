@@ -7,6 +7,7 @@ anything else. Run a longer search with ``HYPOTHESIS_PROFILE=long``.
 
 from __future__ import annotations
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -349,10 +350,8 @@ def test_flatten_returns_canvas_sized_rgba(sprite: Sprite) -> None:
 def test_truncated_file_is_format_error(sprite: Sprite, fraction: float) -> None:
     data = sprite.to_bytes()
     cut = int(fraction * (len(data) - 1))
-    try:
+    with pytest.raises(FormatError):
         Sprite.from_bytes(data[:cut])
-    except FormatError:
-        pass
 
 
 @given(

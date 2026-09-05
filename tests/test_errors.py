@@ -1,3 +1,4 @@
+import struct
 import zlib
 from pathlib import Path
 
@@ -70,6 +71,23 @@ def test_truncated_frame() -> None:
         Sprite.from_bytes(bytes(_header()))
 
 
+@pytest.mark.parametrize("frame_size", [0, 15, 17, 100000])
+def test_empty_frame_size_is_validated(frame_size: int) -> None:
+    data = bytearray(_document())
+    struct.pack_into("<I", data, 128, frame_size)
+    with pytest.raises(FormatError, match="frame"):
+        Sprite.from_bytes(bytes(data))
+
+
+def test_truncated_empty_final_frame_is_rejected() -> None:
+    data = bytearray(_document() + _frame())
+    struct.pack_into("<I", data, 0, len(data))
+    struct.pack_into("<H", data, 6, 2)
+    for missing in range(1, 17):
+        with pytest.raises(FormatError, match="frame"):
+            Sprite.from_bytes(bytes(data[:-missing]))
+
+
 def test_every_truncation_is_format_error() -> None:
     data = (Path(__file__).parent / "fixtures" / "editor.aseprite").read_bytes()
     for length in range(len(data)):
@@ -87,7 +105,7 @@ def test_chunk_past_end_of_data_is_format_error() -> None:
     frame[16:20] = (CHUNK_HEADER_SIZE + 16).to_bytes(4, "little")
     frame[20:22] = CHUNK_COLOR_PROFILE.to_bytes(2, "little")
     header[0:4] = (HEADER_SIZE + len(frame)).to_bytes(4, "little")
-    with pytest.raises(FormatError, match="unexpected end"):
+    with pytest.raises(FormatError, match="truncated frame"):
         Sprite.from_bytes(bytes(header) + bytes(frame))
 
 

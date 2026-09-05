@@ -434,7 +434,7 @@ def test_old_palette_11_reads_scaled_and_writes_old_4() -> None:
     payload.u8(48)
     data = _document(_chunk(CHUNK_OLD_PALETTE_11, bytes(payload.buf)))
     sprite = Sprite.from_bytes(data)
-    assert sprite.palette[0] == Color(64, 128, 192)
+    assert sprite.palette[0] == Color(65, 130, 195)
     assert sprite._had_old_palette_11 is True
     written = sprite.to_bytes()
     types = chunk_types(written)

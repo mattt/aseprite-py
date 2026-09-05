@@ -57,7 +57,10 @@ if TYPE_CHECKING:
     from aseprite._sprite import Sprite
 
 CHUNK_OLD_PALETTE_4 = 0x0004
-CHUNK_OLD_PALETTE_11 = 0x0011
+# Aseprite's FLI_COLOR constant is decimal 11. The specification prints
+# 0x0011 instead; accept that alias for files built from the published spec.
+CHUNK_OLD_PALETTE_11 = 0x000B
+CHUNK_OLD_PALETTE_11_ALIAS = 0x0011
 CHUNK_LAYER = 0x2004
 CHUNK_CEL = 0x2005
 CHUNK_CEL_EXTRA = 0x2006
@@ -142,6 +145,10 @@ def read_sprite(data: bytes) -> Sprite:
             raise FormatError("truncated frame header")
         frame_r = Reader(data, pos, pos + FRAME_HEADER_SIZE)
         frame_size = frame_r.u32()
+        if frame_size < FRAME_HEADER_SIZE:
+            raise FormatError("frame size is smaller than the 16-byte header")
+        if pos + frame_size > len(data):
+            raise FormatError("truncated frame data")
         frame_magic = frame_r.u16()
         if frame_magic != FRAME_MAGIC:
             raise FormatError(f"invalid frame magic {frame_magic:#06x}")
@@ -176,17 +183,17 @@ def read_sprite(data: bytes) -> Sprite:
             if chunk_type == CHUNK_OLD_PALETTE_4:
                 if not saw_palette:
                     old_palette = _read_old_palette(
-                        payload, scale=1, previous=old_palette
+                        payload, scale=1, previous=old_palette, budget=budget
                     )
                 sprite._had_old_palette_4 = True
-            elif chunk_type == CHUNK_OLD_PALETTE_11:
+            elif chunk_type in (CHUNK_OLD_PALETTE_11, CHUNK_OLD_PALETTE_11_ALIAS):
                 if not saw_palette:
                     old_palette = _read_old_palette(
-                        payload, scale=4, previous=old_palette
+                        payload, scale=4, previous=old_palette, budget=budget
                     )
                 sprite._had_old_palette_11 = True
             elif chunk_type == CHUNK_PALETTE:
-                current_palette = _read_palette(payload, current_palette)
+                current_palette = _read_palette(payload, current_palette, budget)
                 saw_palette = True
                 if frame_index == 0:
                     sprite_ud_pending = True
@@ -315,8 +322,11 @@ def read_sprite(data: bytes) -> Sprite:
     return sprite
 
 
-def _read_old_palette(r: Reader, scale: int, previous: Palette) -> Palette:
+def _read_old_palette(
+    r: Reader, scale: int, previous: Palette, budget: DocumentBudget
+) -> Palette:
     packets = r.u16()
+    budget.charge_palette(len(previous))
     colors = [replace(color) for color in previous]
     index = 0
     for _ in range(packets):
@@ -324,19 +334,24 @@ def _read_old_palette(r: Reader, scale: int, previous: Palette) -> Palette:
         count = r.u8() or 256
         index += skip
         for _i in range(count):
-            red = min(r.u8() * scale, 255)
-            green = min(r.u8() * scale, 255)
-            blue = min(r.u8() * scale, 255)
+            red, green, blue = r.u8(), r.u8(), r.u8()
+            if scale == 4:
+                # Replicate the high bits to fill 0..255, as Aseprite does.
+                red = min((red << 2) | (red >> 4), 255)
+                green = min((green << 2) | (green >> 4), 255)
+                blue = min((blue << 2) | (blue >> 4), 255)
             if index >= MAX_PALETTE_COLORS:
                 raise FormatError(f"palette size exceeds {MAX_PALETTE_COLORS}")
-            while len(colors) <= index:
-                colors.append(Color(0, 0, 0, 255))
+            if len(colors) <= index:
+                count_to_add = index + 1 - len(colors)
+                budget.charge_palette(count_to_add)
+                colors.extend(Color(0, 0, 0, 255) for _ in range(count_to_add))
             colors[index] = Color(red, green, blue, 255)
             index += 1
     return Palette(colors)
 
 
-def _read_palette(r: Reader, previous: Palette) -> Palette:
+def _read_palette(r: Reader, previous: Palette, budget: DocumentBudget) -> Palette:
     size = r.u32()
     first = r.u32()
     last = r.u32()
@@ -347,6 +362,7 @@ def _read_palette(r: Reader, previous: Palette) -> Palette:
         return Palette()
     if first > last or last >= size:
         raise FormatError("palette index range is invalid")
+    budget.charge_palette(size)
     colors = [replace(color) for color in previous.colors[:size]]
     colors.extend(Color(0, 0, 0, 0) for _ in range(size - len(colors)))
     for index in range(first, last + 1):

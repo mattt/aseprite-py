@@ -157,6 +157,24 @@ def tilemap_sprite(
     return sprite
 
 
+def legacy_palette_document(chunk_type: int = 0x000B) -> bytes:
+    sprite = Sprite(1, 1, ColorMode.INDEXED)
+    sprite.frames[0][0] = Pixels(1, 1, b"\x01", ColorMode.INDEXED)
+    data = sprite.to_bytes()
+    chunks = []
+    r = Reader(data, HEADER_SIZE + 16)
+    while r.remaining():
+        size = r.u32()
+        kind = r.u16()
+        payload = r.raw(size - 6)
+        if kind == 0x2019:
+            # Two six-bit entries: transparent black, then orange.
+            kind = chunk_type
+            payload = b"\x01\x00\x00\x02\x00\x00\x00\x3f\x20\x10"
+        chunks.append(_chunk(kind, payload))
+    return _document(*chunks, depth=8)
+
+
 def _header(
     *,
     magic: int = FILE_MAGIC,
