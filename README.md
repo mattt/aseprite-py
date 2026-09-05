@@ -279,6 +279,25 @@ These caps bound memory use when you open or flatten a file.
 
 `python -m aseprite info` still prints metadata when the canvas is larger than that pixel cap.
 
+## Compatibility
+
+`flatten()` uses the same Normal blend arithmetic as Aseprite,
+so its output matches the editor's own PNG export pixel for pixel
+for sprites that only use the Normal blend mode.
+
+`Sprite.group_blend` mirrors the header flag that asks for groups
+to be composited with their own opacity and blend mode.
+This library follows the file specification for that flag.
+Aseprite 1.3 ignores it when rendering,
+so that path cannot be checked against the editor yet.
+
+Blend modes, loop directions, color profile types, and external file types
+that this library does not know are kept as `UNKNOWN_<n>` enum members
+and written back unchanged.
+
+Aseprite treats tile 0 of every tileset as the empty tile.
+Leave it blank when you build a tileset with `add_tileset`.
+
 ## Development
 
 ```sh
@@ -305,8 +324,8 @@ Aseprite is separate software under its own license.
 
 Mattt ([@mattt](https://twitter.com/mattt))
 
-[ci]: https://github.com/mattt/aseprite-py/actions
-[ci badge]: https://github.com/mattt/aseprite-py/workflows/CI/badge.svg
+[ci]: https://github.com/mattt/aseprite-py/actions/workflows/ci.yml
+[ci badge]: https://github.com/mattt/aseprite-py/actions/workflows/ci.yml/badge.svg
 [license]: https://www.apache.org/licenses/LICENSE-2.0
 [license badge]: https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat
 [aseprite]: https://www.aseprite.org

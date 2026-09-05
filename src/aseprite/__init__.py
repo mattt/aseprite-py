@@ -44,7 +44,8 @@ from aseprite._sprite import Sprite
 try:
     __version__ = version("aseprite")
 except PackageNotFoundError:
-    __version__ = "0.1.0"
+    # Imported from a source tree that is not installed.
+    __version__ = "0.0.0"
 
 __all__ = [
     "AsepriteError",

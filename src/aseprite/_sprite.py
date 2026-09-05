@@ -313,6 +313,9 @@ class Sprite:
     ) -> Tileset:
         """Adds a tileset and returns it.
 
+        Aseprite treats tile 0 as the empty tile, so leave the first
+        ``tile_height`` rows of ``pixels`` blank.
+
         Args:
             name: The tileset name.
             tile_width: Width of one tile, in pixels.
