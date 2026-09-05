@@ -401,12 +401,13 @@ def _decompress(raw: bytes, max_size: int, budget: DocumentBudget) -> bytes:
     budget.allow(max_size)
     try:
         decoder = zlib.decompressobj()
-        cap = max(max_size, 1)
-        out = decoder.decompress(raw, cap)
+        # Request one extra byte so excess output is detected even when
+        # it is still encoded in decoder.unconsumed_tail.
+        out = decoder.decompress(raw, max_size + 1)
         if len(out) > max_size:
             raise FormatError("decompressed data exceeds the size limit")
-        if len(out) == cap and not decoder.eof and decoder.decompress(b"", 1):
-            raise FormatError("decompressed data exceeds the size limit")
+        if not decoder.eof:
+            raise FormatError("compressed image has an incomplete zlib stream")
         budget.charge(len(out))
         return out
     except zlib.error as exc:

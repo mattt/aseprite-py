@@ -282,7 +282,8 @@ def _write_layer(w: Writer, layer, sprite: Sprite) -> None:  # noqa: ANN001
 def _compress(data: bytes | bytearray, original: bytes | None) -> bytes:
     if original is not None:
         try:
-            if zlib.decompress(original) == data:
+            decoder = zlib.decompressobj()
+            if decoder.decompress(original, len(data) + 1) == data and decoder.eof:
                 return original
         except zlib.error:
             pass
