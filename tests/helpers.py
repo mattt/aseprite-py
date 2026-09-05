@@ -26,6 +26,43 @@ def rgba_sprite(
     return sprite
 
 
+def blend_sprite() -> Sprite:
+    """Returns two RGBA layers with partial alpha and opacity on every pixel.
+
+    The expected flattened bytes were captured from Aseprite's own export
+    of this sprite, so this covers the blend arithmetic on opaque,
+    semi-transparent, and fully transparent backdrops.
+    """
+    sprite = Sprite(4, 2, ColorMode.RGBA)
+    base = sprite.blank_pixels()
+    base[0, 0] = (200, 40, 40, 255)
+    base[1, 0] = (200, 40, 40, 255)
+    base[2, 0] = (30, 60, 90, 120)
+    base[3, 0] = (30, 60, 90, 120)
+    base[0, 1] = (252, 63, 50, 6)
+    base[1, 1] = (10, 10, 10, 3)
+    base[2, 1] = (0, 0, 0, 0)
+    base[3, 1] = (255, 255, 255, 255)
+    sprite.frames[0][sprite.layers[0]] = base
+    top = sprite.add_layer("top", opacity=200)
+    over = sprite.blank_pixels()
+    over[0, 0] = (10, 220, 30, 160)
+    over[1, 0] = (0, 0, 255, 90)
+    over[2, 0] = (255, 255, 255, 40)
+    over[3, 0] = (7, 7, 7, 255)
+    over[0, 1] = (254, 4, 62, 77)
+    over[1, 1] = (100, 200, 50, 2)
+    over[2, 1] = (20, 20, 20, 20)
+    over[3, 1] = (9, 9, 9, 1)
+    sprite.frames[0].set_cel(top, over, opacity=180)
+    return sprite
+
+
+BLEND_SPRITE_EXPECTED = bytes.fromhex(
+    "876625ffa12152ff435c75840e161ec3fd0b3c30203914041414140bffffffff"
+)
+
+
 def tilemap_sprite(
     *,
     tile_id: int = 0,

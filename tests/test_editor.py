@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from aseprite import ColorMode, LayerType, Sprite
-from tests.helpers import aseprite_cli
+from tests.helpers import aseprite_cli, blend_sprite
 
 FIXTURE = Path(__file__).parent / "fixtures" / "editor.aseprite"
 
@@ -63,7 +63,13 @@ def test_flatten_matches_aseprite_cli(tmp_path: Path) -> None:
 
 
 @needs_cli
+def test_blend_matches_cli(tmp_path: Path) -> None:
+    _assert_flatten_matches_cli(blend_sprite(), tmp_path)
+
+
+@needs_cli
 def test_group_above_layer_matches_cli(tmp_path: Path) -> None:
+
     sprite = Sprite(2, 2)
     base = sprite.layers[0]
     pixels = sprite.blank_pixels()

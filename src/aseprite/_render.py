@@ -220,7 +220,8 @@ def _blit_cel(sprite: Sprite, layer: Layer, cel: Cel, dest: bytearray) -> None:
     pixels = _cel_pixels(sprite, layer, cel)
     if pixels is None:
         return
-    opacity = (layer.opacity * cel.opacity + 127) // 255
+    opacity = _mul_un8(layer.opacity, cel.opacity)
+
     for py in range(pixels.height):
         for px in range(pixels.width):
             dx = cel.x + px
@@ -259,21 +260,30 @@ def _blend_buffer(
         )
 
 
+def _mul_un8(a: int, b: int) -> int:
+    """Returns ``a * b / 255`` rounded the way Aseprite's ``MUL_UN8`` does."""
+    t = a * b + 0x80
+    return ((t >> 8) + t) >> 8
+
+
 def _blend_normal(dst: bytes, src: bytes, opacity: int) -> bytes:
-    sa = (src[3] * opacity + 127) // 255
-    if sa == 0:
-        if dst[3] == 0:
-            return bytes((src[0], src[1], src[2], 0))
+    """Blends ``src`` over ``dst`` with Aseprite's ``rgba_blender_normal``.
+
+    The arithmetic matches the editor so that flattened pixels agree with
+    its own export, including the truncating division on each channel.
+    """
+    if dst[3] == 0:
+        return bytes((src[0], src[1], src[2], _mul_un8(src[3], opacity)))
+    if src[3] == 0:
         return dst
+    sa = _mul_un8(src[3], opacity)
     da = dst[3]
-    if da == 0:
-        return bytes((src[0], src[1], src[2], sa))
-    out_a = sa + (da * (255 - sa) + 127) // 255
-    if out_a == 0:
-        return b"\x00\x00\x00\x00"
-    out = []
+    out_a = sa + da - _mul_un8(da, sa)
+    out = bytearray(4)
     for c in range(3):
-        num = src[c] * sa + dst[c] * da * (255 - sa) // 255
-        out.append((num + out_a // 2) // out_a)
-    out.append(out_a)
+        delta = (src[c] - dst[c]) * sa
+        # C integer division truncates toward zero.
+        step = -(-delta // out_a) if delta < 0 else delta // out_a
+        out[c] = dst[c] + step
+    out[3] = out_a
     return bytes(out)

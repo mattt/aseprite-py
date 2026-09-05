@@ -13,12 +13,15 @@ from aseprite import (
 )
 from aseprite._limits import MAX_GROUP_DEPTH, MAX_PIXELS
 from aseprite._model import TILESET_FLAG_EMBEDDED
+from aseprite._render import _blend_normal
 from tests.helpers import (
+    BLEND_SPRITE_EXPECTED,
     TILE_BL,
     TILE_BR,
     TILE_PIXELS,
     TILE_TL,
     TILE_TR,
+    blend_sprite,
     rgba_sprite,
     tilemap_sprite,
 )
@@ -73,7 +76,34 @@ def test_flatten_opacity() -> None:
     assert data[0] > 0
 
 
+def test_flatten_blend_matches_aseprite_export() -> None:
+    assert blend_sprite().flatten(0) == BLEND_SPRITE_EXPECTED
+
+
+def test_blend_normal_stays_in_range() -> None:
+    # This input used to produce a channel value of 257.
+    assert _blend_normal(bytes((252, 63, 50, 6)), bytes((254, 4, 62, 77)), 78) == (
+        bytes((253, 15, 59, 29))
+    )
+    assert _blend_normal(b"\x00\x00\x00\x00", b"\x01\x02\x03\xff", 0) == (
+        b"\x01\x02\x03\x00"
+    )
+    assert _blend_normal(b"\x10\x20\x30\xff", b"\x01\x02\x03\x00", 255) == (
+        b"\x10\x20\x30\xff"
+    )
+    for dst_alpha in range(0, 256, 15):
+        for src_alpha in range(0, 256, 15):
+            for opacity in range(0, 256, 15):
+                out = _blend_normal(
+                    bytes((252, 63, 50, dst_alpha)),
+                    bytes((254, 4, 62, src_alpha)),
+                    opacity,
+                )
+                assert len(out) == 4
+
+
 def test_image_extra() -> None:
+
     sprite = rgba_sprite(1, 1)
     image = sprite.image(0)
     assert image.size == (1, 1)
