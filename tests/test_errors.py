@@ -3,7 +3,15 @@ from pathlib import Path
 
 import pytest
 
-from aseprite import AsepriteError, Cel, ColorMode, FormatError, Pixels, Sprite
+from aseprite import (
+    AsepriteError,
+    Cel,
+    ColorMode,
+    FormatError,
+    Pixels,
+    Sprite,
+    UserData,
+)
 from aseprite._binary import (
     CHUNK_HEADER_SIZE,
     FRAME_HEADER_SIZE,
@@ -331,6 +339,37 @@ def test_tileset_user_data_does_not_preallocate() -> None:
     assert sprite.tilesets[0].tile_user_data == []
 
 
+def test_trailing_empty_tile_user_data_is_dropped() -> None:
+    tileset = Writer()
+    tileset.u32(0)
+    tileset.u32(0)
+    tileset.u32(3)
+    tileset.u16(1)
+    tileset.u16(1)
+    tileset.i16(1)
+    tileset.pad(14)
+    tileset.string("t")
+    empty = Writer()
+    empty.u32(0)
+    note = Writer()
+    note.u32(1)
+    note.string("tile 1")
+    sprite = Sprite.from_bytes(
+        _document(
+            _chunk(CHUNK_TILESET, bytes(tileset.buf)),
+            _chunk(CHUNK_USER_DATA, bytes(empty.buf)),
+            _chunk(CHUNK_USER_DATA, bytes(empty.buf)),
+            _chunk(CHUNK_USER_DATA, bytes(note.buf)),
+            _chunk(CHUNK_USER_DATA, bytes(empty.buf)),
+        )
+    )
+    loaded = sprite.tilesets[0]
+    assert loaded.user_data is None
+    assert loaded.tile_user_data == [None, UserData(text="tile 1")]
+    again = Sprite.from_bytes(sprite.to_bytes())
+    assert again == sprite
+
+
 def test_truncated_chunk_header() -> None:
     header = _header()
     frame = bytearray(FRAME_HEADER_SIZE + 3)
@@ -361,20 +400,43 @@ def test_palette_index_range_invalid() -> None:
         Sprite.from_bytes(_document(_chunk(CHUNK_PALETTE, bytes(payload))))
 
 
-def test_tileset_image_size_mismatch() -> None:
+def test_short_tileset_image_is_zero_padded() -> None:
     tileset = Writer()
     tileset.u32(0)
     tileset.u32(2)
-    tileset.u32(1)
+    tileset.u32(2)
     tileset.u16(2)
-    tileset.u16(2)
+    tileset.u16(1)
     tileset.i16(1)
     tileset.pad(14)
     tileset.string("t")
     compressed = zlib.compress(b"\x00\x00\x00\xff")
     tileset.u32(len(compressed))
     tileset.raw(compressed)
-    with pytest.raises(FormatError, match="tile dimensions"):
+    sprite = Sprite.from_bytes(_document(_chunk(CHUNK_TILESET, bytes(tileset.buf))))
+    pixels = sprite.tilesets[0].pixels
+    assert pixels is not None
+    assert (pixels.width, pixels.height) == (2, 2)
+    assert bytes(pixels.data) == b"\x00\x00\x00\xff" + bytes(12)
+
+
+def test_short_tileset_image_counts_against_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("aseprite._reader.MAX_UNCOMPRESSED_BYTES", 8)
+    tileset = Writer()
+    tileset.u32(0)
+    tileset.u32(2)
+    tileset.u32(2)
+    tileset.u16(2)
+    tileset.u16(1)
+    tileset.i16(1)
+    tileset.pad(14)
+    tileset.string("t")
+    compressed = zlib.compress(b"\x00\x00\x00\xff")
+    tileset.u32(len(compressed))
+    tileset.raw(compressed)
+    with pytest.raises(FormatError, match="size limit"):
         Sprite.from_bytes(_document(_chunk(CHUNK_TILESET, bytes(tileset.buf))))
 
 

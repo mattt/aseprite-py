@@ -184,7 +184,6 @@ def test_invalid_layer_opacity_flag_reads_as_opaque() -> None:
 
 
 def test_layer_opacity_flag_roundtrip() -> None:
-
     sprite = Sprite(1, 1)
     sprite.valid_layer_opacity = False
     loaded = Sprite.from_bytes(sprite.to_bytes())

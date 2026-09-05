@@ -221,7 +221,6 @@ def _blit_cel(sprite: Sprite, layer: Layer, cel: Cel, dest: bytearray) -> None:
     if pixels is None:
         return
     opacity = _mul_un8(layer.opacity, cel.opacity)
-
     for py in range(pixels.height):
         for px in range(pixels.width):
             dx = cel.x + px

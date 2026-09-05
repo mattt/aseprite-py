@@ -188,7 +188,6 @@ def read_sprite(data: bytes) -> Sprite:
                     # flag says layer opacity is valid.
                     layer.opacity = 255
                 layer.index = len(sprite.layers)
-
                 sprite.layers.append(layer)
                 last_layer = layer
                 last_cel = None
@@ -290,6 +289,13 @@ def read_sprite(data: bytes) -> Sprite:
 
             chunk_pos += chunk_size
         pos = frame_end
+
+    for tileset in sprite.tilesets:
+        # Aseprite writes an empty user-data chunk for every tile.
+        # Trailing empty entries carry no information and are not written back.
+        tile_ud = tileset.tile_user_data
+        while tile_ud and tile_ud[-1] is None:
+            tile_ud.pop()
 
     return sprite
 
@@ -588,8 +594,11 @@ def _read_tileset(r: Reader, color_mode: ColorMode, budget: DocumentBudget) -> T
         compressed = r.raw(length)
         expected = tile_width * tile_height * tile_count * color_mode.bytes_per_pixel
         raw = _decompress(compressed, expected, budget)
-        if len(raw) != expected:
-            raise FormatError("tileset image size does not match tile dimensions")
+        if len(raw) < expected:
+            # Aseprite itself writes and accepts tileset images shorter than
+            # tile_count tiles; the missing tiles are transparent.
+            budget.charge(expected - len(raw))
+            raw += bytes(expected - len(raw))
         image_height = tile_height * tile_count
         pixels = _pixels(
             tile_width, image_height, raw, color_mode, compressed=compressed
