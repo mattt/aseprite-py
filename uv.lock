@@ -21,7 +21,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pillow", marker = "extra == 'image'", specifier = ">=12.3.0" }]
+requires-dist = [{ name = "pillow", marker = "extra == 'image'", specifier = ">=10.1" }]
 provides-extras = ["image"]
 
 [package.metadata.requires-dev]

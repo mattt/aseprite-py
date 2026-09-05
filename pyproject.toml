@@ -16,6 +16,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Multimedia :: Graphics",
     "Typing :: Typed",
 ]
@@ -28,7 +29,7 @@ Issues = "https://github.com/mattt/aseprite-py/issues"
 
 [project.optional-dependencies]
 image = [
-    "pillow>=12.3.0",
+    "pillow>=10.1",
 ]
 
 [build-system]
