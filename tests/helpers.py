@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from aseprite import ColorMode, LayerType, Pixels, Sprite, Tilemap, Tileset
+from aseprite import Color, ColorMode, LayerType, Pixels, Sprite, Tilemap, Tileset
 from aseprite._binary import FILE_MAGIC, FRAME_MAGIC, HEADER_SIZE, Reader, Writer
 from aseprite._model import TILESET_FLAG_EMBEDDED, TILESET_FLAG_EMPTY_IS_ZERO
 
@@ -61,6 +61,34 @@ def blend_sprite() -> Sprite:
 BLEND_SPRITE_EXPECTED = bytes.fromhex(
     "876625ffa12152ff435c75840e161ec3fd0b3c30203914041414140bffffffff"
 )
+
+
+def indexed_overlap_sprite() -> Sprite:
+    """Returns two indexed layers whose pixels overlap.
+
+    Aseprite composites indexed sprites by replacing indices, so the
+    half-transparent blue on top wins over the red below it and the
+    transparent index lets the green show through.
+    """
+    sprite = Sprite(2, 1, ColorMode.INDEXED)
+    sprite.palette.extend(
+        [Color(0, 0, 0, 0), Color(255, 0, 0), Color(0, 0, 255, 128), Color(0, 255, 0)]
+    )
+    sprite.transparent_index = 0
+    sprite.layers[0].opacity = 128
+    bottom = sprite.blank_pixels()
+    bottom[0, 0] = 1
+    bottom[1, 0] = 3
+    sprite.frames[0][sprite.layers[0]] = bottom
+    top = sprite.add_layer("top")
+    over = sprite.blank_pixels()
+    over[0, 0] = 2
+    over[1, 0] = 0
+    sprite.frames[0].set_cel(top, over, opacity=128)
+    return sprite
+
+
+INDEXED_OVERLAP_EXPECTED = b"\x00\x00\xff\x80\x00\xff\x00\xff"
 
 
 def tilemap_sprite(

@@ -284,6 +284,15 @@ These caps bound memory use when you open or flatten a file.
 `flatten()` uses the same Normal blend arithmetic as Aseprite,
 so its output matches the editor's own PNG export pixel for pixel
 for sprites that only use the Normal blend mode.
+Cels are painted in Aseprite's order:
+layer index plus z-index across the whole layer list.
+
+Indexed sprites are composited the way Aseprite composites them,
+in index space.
+A pixel replaces the one below it unless it is the transparent index
+on a layer that is not a background layer.
+Layer and cel opacity do not apply in indexed mode.
+The palette, including each entry's alpha, is applied at the end.
 
 `Sprite.group_blend` mirrors the header flag that asks for groups
 to be composited with their own opacity and blend mode.

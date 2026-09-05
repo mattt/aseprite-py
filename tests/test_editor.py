@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from aseprite import ColorMode, LayerType, Pixels, Sprite
-from tests.helpers import aseprite_cli, blend_sprite
+from tests.helpers import aseprite_cli, blend_sprite, indexed_overlap_sprite
 
 FIXTURE = Path(__file__).parent / "fixtures" / "editor.aseprite"
 
@@ -65,6 +65,11 @@ def test_flatten_matches_aseprite_cli(tmp_path: Path) -> None:
 @needs_cli
 def test_blend_matches_cli(tmp_path: Path) -> None:
     _assert_flatten_matches_cli(blend_sprite(), tmp_path)
+
+
+@needs_cli
+def test_indexed_overlap_matches_cli(tmp_path: Path) -> None:
+    _assert_flatten_matches_cli(indexed_overlap_sprite(), tmp_path)
 
 
 @needs_cli

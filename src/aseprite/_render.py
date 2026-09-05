@@ -30,18 +30,57 @@ def flatten_frame(sprite: Sprite, frame_index: int) -> bytes:
         raise IndexError(f"frame {frame_index} is out of range")
     if sprite.width * sprite.height > MAX_PIXELS:
         raise ValueError(f"canvas exceeds {MAX_PIXELS} pixels")
+    top_level = [layer for layer in sprite.layers if layer.child_level == 0]
+    if sprite.color_mode is ColorMode.INDEXED:
+        return _flatten_indexed(sprite, frame_index, top_level)
     dest = bytearray(sprite.width * sprite.height * 4)
     isolate_groups = sprite.group_blend
     scratches: list[bytearray] = []
-    _composite_layers(
-        sprite,
-        frame_index,
-        [layer for layer in sprite.layers if layer.child_level == 0],
-        dest,
-        isolate_groups,
-        scratches,
-    )
+    _composite_layers(sprite, frame_index, top_level, dest, isolate_groups, scratches)
     return bytes(dest)
+
+
+def _flatten_indexed(sprite: Sprite, frame_index: int, layers: list[Layer]) -> bytes:
+    """Composites an indexed sprite the way Aseprite does.
+
+    Indexed sprites are composited in index space: a pixel replaces the one
+    below it unless it is the transparent index on a non-background layer.
+    Layer and cel opacity and group isolation do not apply. The palette is
+    applied once at the end.
+    """
+    width, height = sprite.width, sprite.height
+    indices = bytearray(width * height)
+    painted = bytearray(width * height)
+    for _order, _z, layer, cel in _collect_entries(
+        sprite, frame_index, layers, False, 0
+    ):
+        if cel is None:
+            continue
+        pixels = _cel_pixels(sprite, layer, cel)
+        if pixels is None or pixels.color_mode is not ColorMode.INDEXED:
+            continue
+        skip = None if layer.background else sprite.transparent_index
+        x0 = max(0, -cel.x)
+        y0 = max(0, -cel.y)
+        x1 = min(pixels.width, width - cel.x)
+        y1 = min(pixels.height, height - cel.y)
+        data = pixels.data
+        for py in range(y0, y1):
+            row = py * pixels.width
+            dest_row = (cel.y + py) * width + cel.x
+            for px in range(x0, x1):
+                index = data[row + px]
+                if index == skip:
+                    continue
+                indices[dest_row + px] = index
+                painted[dest_row + px] = 1
+    out = bytearray(width * height * 4)
+    palette = sprite.palette.colors
+    for i in range(width * height):
+        if painted[i] and indices[i] < len(palette):
+            color = palette[indices[i]]
+            out[i * 4 : i * 4 + 4] = bytes((color.r, color.g, color.b, color.a))
+    return bytes(out)
 
 
 def _composite_layers(

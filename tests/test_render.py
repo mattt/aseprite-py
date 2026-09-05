@@ -16,12 +16,14 @@ from aseprite._model import TILESET_FLAG_EMBEDDED
 from aseprite._render import _blend_normal
 from tests.helpers import (
     BLEND_SPRITE_EXPECTED,
+    INDEXED_OVERLAP_EXPECTED,
     TILE_BL,
     TILE_BR,
     TILE_PIXELS,
     TILE_TL,
     TILE_TR,
     blend_sprite,
+    indexed_overlap_sprite,
     rgba_sprite,
     tilemap_sprite,
 )
@@ -61,6 +63,25 @@ def test_flatten_indexed_transparent() -> None:
     data = sprite.flatten(0)
     assert data[0:4] == b"\x00\x00\x00\x00"
     assert data[4:8] == b"\x00\xff\x00\xff"
+
+
+def test_flatten_indexed_replaces_indices_and_ignores_opacity() -> None:
+    # Expected bytes were captured from Aseprite 1.3.18's export.
+    assert indexed_overlap_sprite().flatten(0) == INDEXED_OVERLAP_EXPECTED
+
+
+def test_flatten_indexed_z_index_and_groups() -> None:
+    sprite = Sprite(1, 1, ColorMode.INDEXED, empty=True)
+    sprite.palette.extend([Color(0, 0, 0, 0), Color(255, 0, 0), Color(0, 255, 0)])
+    group = sprite.add_layer("g", kind=LayerType.GROUP)
+    child = sprite.add_layer("child", parent=group)
+    plain = sprite.add_layer("plain")
+    frame = sprite.add_frame(100)
+    frame.set_cel(child, Pixels(1, 1, b"\x01", ColorMode.INDEXED), z_index=2)
+    frame.set_cel(plain, Pixels(1, 1, b"\x02", ColorMode.INDEXED))
+    assert sprite.flatten(0) == b"\xff\x00\x00\xff"
+    child.visible = False
+    assert sprite.flatten(0) == b"\x00\xff\x00\xff"
 
 
 def test_flatten_opacity() -> None:
