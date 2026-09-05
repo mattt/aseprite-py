@@ -390,6 +390,17 @@ def test_add_tileset_without_pixels_embeds_blank_image() -> None:
     assert bytes(tileset.pixels.data) == bytes(8 * 16 * 4)
 
 
+def test_indexed_blank_pixels_use_transparent_index() -> None:
+    sprite = Sprite(2, 2, ColorMode.INDEXED)
+    sprite.transparent_index = 7
+    assert bytes(sprite.blank_pixels().data) == b"\x07" * 4
+    assert bytes(sprite.blank_pixels(1, 3).data) == b"\x07" * 3
+    tileset = sprite.add_tileset("tiles", 2, 2, 1)
+    assert tileset.pixels is not None
+    assert bytes(tileset.pixels.data) == b"\x07" * 4
+    assert bytes(Sprite(2, 1).blank_pixels().data) == bytes(8)
+
+
 def test_add_tileset_with_pixels_roundtrips() -> None:
     sprite = Sprite(8, 8)
     pixels = sprite.blank_pixels(8, 8)

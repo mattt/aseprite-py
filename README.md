@@ -304,8 +304,10 @@ Blend modes, loop directions, color profile types, and external file types
 that this library does not know are kept as `UNKNOWN_<n>` enum members
 and written back unchanged.
 
-Aseprite treats tile 0 of every tileset as the empty tile.
-Leave it blank when you build a tileset with `add_tileset`.
+Aseprite treats tile 0 of every tileset as the empty tile
+and keeps its image transparent, so leave it transparent
+when you build a tileset with `add_tileset`.
+`blank_pixels()` on an indexed sprite is filled with `transparent_index`.
 Aseprite 1.3 reads only tilemaps with 32 bits per tile.
 
 ## Development

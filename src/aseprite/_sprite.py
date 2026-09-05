@@ -190,15 +190,18 @@ class Sprite:
     ) -> Pixels:
         """Returns a transparent buffer in this sprite's color mode.
 
+        For an indexed sprite the buffer is filled with ``transparent_index``.
+
         Args:
             width: Buffer width. The default is the canvas width.
             height: Buffer height. The default is the canvas height.
         """
-        return Pixels.blank(
-            self.width if width is None else width,
-            self.height if height is None else height,
-            self.color_mode,
-        )
+        width = self.width if width is None else width
+        height = self.height if height is None else height
+        if self.color_mode is ColorMode.INDEXED:
+            data = bytes((self.transparent_index,)) * (width * height)
+            return Pixels(width, height, data, ColorMode.INDEXED)
+        return Pixels.blank(width, height, self.color_mode)
 
     def add_frame(self, duration_ms: int = 100) -> Frame:
         """Appends a frame and returns it.
@@ -324,13 +327,13 @@ class Sprite:
             pixels: The embedded tile image.
                 Width must be ``tile_width``.
                 Height must be ``tile_height * tile_count``.
-                The default is a blank image, because Aseprite drops
+                The default is a transparent image, because Aseprite drops
                 tilemap layers whose tileset has no image.
             tileset_id: File-format tileset ID. The default is the next index.
         """
         expected_height = tile_height * tile_count
         if pixels is None:
-            pixels = Pixels.blank(tile_width, expected_height, self.color_mode)
+            pixels = self.blank_pixels(tile_width, expected_height)
         if pixels.width != tile_width or pixels.height != expected_height:
             raise ValueError("tileset image size does not match tile dimensions")
         _check_color_mode(pixels, self.color_mode, "tileset")

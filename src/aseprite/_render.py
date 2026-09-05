@@ -247,8 +247,8 @@ def _tiles_to_pixels(sprite: Sprite, layer: Layer, cel: Cel) -> Pixels | None:
             else:
                 value = tm.tiles[offset]
             tile_id = value & tm.tile_id_mask
-            if tileset.flags & 4 and tile_id == 0:
-                continue
+            # Aseprite draws tile 0 like any other tile; it is empty only
+            # because the editor keeps that tile's image transparent.
             src = tile_id * tile_bytes
             if src + tile_bytes > len(pixel_data):
                 continue

@@ -272,9 +272,10 @@ def test_flatten_tilemap_d_flip_nonsquare() -> None:
     assert data[12:16] == b"\x00\x00\x00\x00"
 
 
-def test_flatten_tilemap_16bit_and_empty_is_zero() -> None:
+def test_flatten_tilemap_16bit_and_tile_zero_is_drawn() -> None:
     assert tilemap_sprite(bits_per_tile=16).flatten(0) == TILE_PIXELS
-    assert tilemap_sprite(empty_is_zero=True).flatten(0) == b"\x00" * 16
+    # Aseprite draws tile 0 from the tileset image regardless of the flag.
+    assert tilemap_sprite(empty_is_zero=True).flatten(0) == TILE_PIXELS
 
 
 def test_flatten_grayscale() -> None:
