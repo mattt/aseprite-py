@@ -63,6 +63,15 @@ class Sprite:
     A new sprite has one layer named ``Layer 1`` and one frame.
     Pass ``empty=True`` to start with no layers or frames.
 
+    Attributes:
+        group_blend: Set true to composite each group separately and apply
+            its opacity. This follows the file header flag; Aseprite 1.3
+            ignores that flag during rendering.
+        valid_layer_opacity: Whether stored layer opacity values apply.
+            False treats layers as fully opaque when compositing.
+        transparent_index: The empty pixel index in indexed mode. It is
+            skipped on non-background layers and used by ``blank_pixels``.
+
     Args:
         width: Canvas width in pixels.
         height: Canvas height in pixels.
@@ -133,6 +142,7 @@ class Sprite:
         """Opens and returns a sprite from a path or binary file object.
 
         The file must be a valid ``.ase`` or ``.aseprite`` document.
+        The allocation limits documented on ``from_bytes`` also apply.
 
         Args:
             source: A path or a binary file object.
@@ -149,6 +159,12 @@ class Sprite:
     @classmethod
     def from_bytes(cls, data: bytes) -> Sprite:
         """Parses and returns a sprite from file bytes.
+
+        Reading is limited to 256 MiB of uncompressed cel and tileset
+        pixels, 65,535 colors per palette, and 1,048,576 palette entries
+        allocated across all chunks. Partial palette updates count the
+        complete copied palette toward the latter limit. Exceeding a
+        limit raises ``FormatError`` before the allocation.
 
         Args:
             data: The contents of an ``.ase`` or ``.aseprite`` file.
@@ -299,6 +315,26 @@ class Sprite:
         Args:
             name: The slice name.
             keys: Optional slice keys. The default is an empty list.
+
+        Example:
+            Add a slice with a nine-patch center and pivot::
+
+                from aseprite import NinePatch, SliceKey
+
+                sprite.add_slice(
+                    "box",
+                    [
+                        SliceKey(
+                            frame=0,
+                            x=2,
+                            y=2,
+                            width=12,
+                            height=12,
+                            nine_patch=NinePatch(1, 1, 10, 10),
+                            pivot=(6, 6),
+                        )
+                    ],
+                )
         """
         sl = Slice(name=name, keys=list(keys or []))
         self.slices.append(sl)
@@ -361,6 +397,10 @@ class Sprite:
 
         ``palette`` is the initial palette. A frame's optional ``palette``
         replaces it from that frame onward.
+
+        Returns the mutable effective palette, so edits also affect frames
+        that inherit it. Assign a new ``Palette`` to ``Frame.palette`` to
+        change colors from one frame onward without editing earlier frames.
         """
         if frame < 0 or frame >= len(self.frames):
             raise IndexError(f"frame {frame} is out of range")
@@ -373,10 +413,17 @@ class Sprite:
     def flatten(self, frame: int = 0) -> bytes:
         """Composites the given frame and returns RGBA8 bytes.
 
-        Hidden layers are skipped.
+        Hidden and reference layers are skipped.
         Linked cels are resolved.
         Group isolation follows ``group_blend``.
-        Only the Normal blend mode is applied.
+        Cels are ordered by layer index plus z-index, then z-index to break
+        ties. Only Normal blending is implemented; other blend modes are
+        rendered as Normal. Use Aseprite to export those blend modes.
+
+        Indexed compositing follows ``ColorMode.INDEXED`` semantics.
+        Canvases are limited to 67,108,864 pixels (the area of 8192 by 8192).
+        Tilemap expansion has the same pixel limit; isolated groups have
+        a 256 MiB scratch-buffer limit and at most 256 nesting levels.
 
         Args:
             frame: The frame index to composite.
@@ -386,6 +433,7 @@ class Sprite:
 
         Raises:
             IndexError: If the frame index is out of range.
+            ValueError: If canvas, tilemap, or group limits are exceeded.
         """
         from aseprite._render import flatten_frame
 
@@ -394,7 +442,8 @@ class Sprite:
     def image(self, frame: int = 0) -> PILImage:
         """Composites the given frame and returns a Pillow image.
 
-        Requires the ``aseprite[image]`` extra.
+        Requires the ``aseprite[image]`` extra. Rendering behavior and
+        allocation limits are the same as ``flatten``.
 
         Args:
             frame: The frame index to composite.

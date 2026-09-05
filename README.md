@@ -3,41 +3,21 @@
 [![CI][ci badge]][ci]
 [![License][license badge]][license]
 
-A Python library for reading and writing
-[Aseprite][aseprite] `.ase` / `.aseprite` files.
-It implements the
-[Aseprite file format specification][spec].
+A Python library for reading and writing [Aseprite][aseprite]
+`.ase` / `.aseprite` files, based on the [file format specification][spec].
 
-> [!IMPORTANT]
-> This project is unofficial and is not affiliated with Igara Studio.
-> It does not include, download, or require the Aseprite application.
+This project is unofficial and is not affiliated with Igara Studio.
+It works directly with files and does not require the Aseprite application.
 
-## Features
-
-- [x] Read and write `.ase` / `.aseprite` documents
-- [x] RGBA, grayscale, and indexed color modes
-- [x] Layers, groups, and tilemaps
-- [x] Animation tags, slices (nine-patch and pivot), and palettes
-- [x] User data with typed properties
-- [x] Tilesets, linked cels, color profiles, and external file references
-- [x] Flatten a frame to RGBA8
-  (visibility, opacity, groups, z-index, linked cels, Normal blend)
-- [x] Optional Pillow extra for PNG export
-
-This library specifically **does not**:
-
-- Run the Aseprite application
-- Execute Lua scripts
-- Wrap the Aseprite CLI
-
-Those belong to Aseprite itself and to
-[aseprite-mcp][aseprite-mcp].
-
-## Requirements
-
-- Python 3.12 or later
+- RGBA, grayscale, and indexed color
+- Layers, groups, tilemaps, tilesets, and linked cels
+- Animation tags, palettes, and slices with nine-patch centers and pivots
+- Color profiles, external file references, and typed user data
+- Frame rendering with Normal blending and optional PNG export
 
 ## Installation
+
+Requires Python 3.12 or later.
 
 ```sh
 uv add aseprite
@@ -49,33 +29,30 @@ Or with pip:
 pip install aseprite
 ```
 
-For Pillow image export:
+Include the Pillow extra for image export:
 
 ```sh
 uv add "aseprite[image]"
 ```
 
-## Usage
-
-`Sprite.open` reads a `.ase` or `.aseprite` file.
-`Sprite.from_bytes` reads the same data from memory.
-Both raise `FormatError` if the bytes are not a valid document.
+## Open and export a sprite
 
 ```python
-from pathlib import Path
-
 from aseprite import Sprite
 
 sprite = Sprite.open("hero.aseprite")
 print(sprite.size, sprite.color_mode)
 print(len(sprite.frames), "frames")
-print(len(sprite.layers), "layers")
+print([layer.name for layer in sprite.layers])
 
-data = Path("hero.aseprite").read_bytes()
-same = Sprite.from_bytes(data)
+sprite.image(frame=0).save("hero.png")
 ```
 
-`open` and `save` also accept a binary file object.
+`image()` returns a Pillow image. Use `flatten()` for raw RGBA bytes.
+Rendering supports Normal blending; use Aseprite to export other blend modes.
+
+`Sprite.from_bytes(data)` reads from memory. `open()` and `save()` also accept
+binary file objects:
 
 ```python
 from io import BytesIO
@@ -86,132 +63,75 @@ buf.seek(0)
 copy = Sprite.open(buf)
 ```
 
-### Layers, tags, and slices
+## Create and animate
 
-Layers, tags, slices, and tilesets support lookup by index or name.
-`"idle" in sprite.tags` is true when a tag with that name exists.
-`get` returns `None` when the name is missing.
+A new sprite starts with one layer and one frame.
 
 ```python
-idle = sprite.tags["idle"]
-print(idle.from_frame, idle.to_frame, idle.direction)
+from aseprite import Sprite
 
-if "outline" in sprite.layers:
-    outline = sprite.layers["outline"]
-    print(outline.name, outline.kind, outline.visible)
-
-box = sprite.slices.get("box")
-if box is not None:
-    key = box.keys[0]
-    print(key.x, key.y, key.width, key.height)
-```
-
-Group layers stay in file order.
-`layers.children(group)` returns the direct children.
-
-```python
-from aseprite import LayerType
-
-for layer in sprite.layers:
-    indent = "  " * layer.child_level
-    print(f"{indent}{layer.name} ({layer.kind.name})")
-
-body = sprite.layers.get("body")
-if body is not None and body.kind is LayerType.GROUP:
-    for child in sprite.layers.children(body):
-        print(child.name)
-```
-
-### Cels and pixels
-
-`frame[layer]` returns the cel on that layer, or raises `KeyError`.
-`frame.cel(layer)` returns `None` when the cel is missing.
-RGBA and grayscale pixels are `Color` values.
-Indexed pixels are palette indices.
-
-```python
-layer = sprite.layers[0]
-cel = sprite.frames[0].cel(layer)
-if cel is not None and cel.pixels is not None:
-    print(cel.x, cel.y, cel.pixels[0, 0])
-```
-
-`flatten` composites one frame to `width * height * 4` bytes of RGBA.
-Hidden layers are skipped.
-Linked cels are resolved.
-Only the Normal blend mode is applied.
-A frame index outside the document raises `IndexError`.
-
-`image` returns a Pillow `Image` in RGBA mode.
-It requires the `aseprite[image]` extra.
-
-```python
-rgba = sprite.flatten(frame=0)
-image = sprite.image(frame=0)
-image.save("hero.png")
-```
-
-[examples/export_png.py](examples/export_png.py) is a
-[PEP 723](https://peps.python.org/pep-0723/) script.
-`uv run` installs `aseprite[image]` for that process and writes a PNG.
-
-```sh
-uv run examples/export_png.py
-uv run examples/export_png.py out.png
-```
-
-### Create a sprite
-
-`Sprite(width, height)` uses RGBA and adds one layer named `Layer 1`
-and one frame of 100 ms.
-Pass `empty=True` if you do not want those defaults.
-`to_bytes` and `save` raise `ValueError` when there are no frames.
-
-```python
-from aseprite import ColorMode, Sprite
-
-sprite = Sprite(32, 32, ColorMode.RGBA)
+sprite = Sprite(32, 32)
 layer = sprite.layers[0]
 pixels = sprite.blank_pixels()
 pixels[0, 0] = (255, 0, 0, 255)
 pixels[1, 0] = (0, 255, 0)
 sprite.frames[0][layer] = pixels
-sprite.add_tag("idle", 0, 0)
+
+walk = sprite.add_frame(duration_ms=80)
+walk.set_linked_cel(layer, source_frame=0)
+sprite.add_tag("walk", 0, 1)
 sprite.save("hero.aseprite")
 ```
 
-`add_frame` appends a frame.
-`set_linked_cel` points a later frame at an earlier one on the same layer.
-
-```python
-from aseprite import LoopDirection
-
-walk = sprite.add_frame(duration_ms=80)
-walk.set_linked_cel(layer, 0)
-sprite.add_tag("walk", 0, 1, direction=LoopDirection.FORWARD, repeat=0)
-```
-
-`add_layer` can nest a layer under a group.
+Nest layers by passing a group as the parent:
 
 ```python
 from aseprite import LayerType
 
 group = sprite.add_layer("body", kind=LayerType.GROUP)
 sprite.add_layer("outline", parent=group)
+
+for child in sprite.layers.children(group):
+    print(child.name)
 ```
 
-### Indexed color
+## Inspect layers and metadata
 
-An indexed sprite stores a palette.
-`transparent_index` selects the index that `flatten` treats as transparent
-on non-background layers.
+Layers, tags, slices, and tilesets support lookup by index or name.
+Use `get()` for an optional lookup.
 
 ```python
-from aseprite import Color, ColorMode, Sprite
+idle = sprite.tags.get("idle")
+if idle is not None:
+    print(idle.from_frame, idle.to_frame, idle.direction)
+
+if "outline" in sprite.layers:
+    outline = sprite.layers["outline"]
+    print(outline.visible, outline.opacity)
+
+box = sprite.slices.get("box")
+if box is not None:
+    print(box.keys[0])
+```
+
+`frame.cel(layer)` returns the cel, or `None` if that layer has no cel.
+RGBA and grayscale pixels are `Color` values; indexed pixels are integers.
+
+```python
+cel = sprite.frames[0].cel(sprite.layers[0])
+if cel is not None and cel.pixels is not None:
+    print(cel.x, cel.y, cel.pixels[0, 0])
+```
+
+## Indexed color
+
+Populate the palette, then draw with palette indices:
+
+```python
+from aseprite import Color, ColorMode, Palette, Sprite
 
 sprite = Sprite(16, 16, ColorMode.INDEXED)
-sprite.palette.append(Color(0, 0, 0, 0))
-sprite.palette.append(Color(255, 80, 40))
+sprite.palette = Palette([Color(0, 0, 0, 0), Color(255, 80, 40)])
 sprite.transparent_index = 0
 
 pixels = sprite.blank_pixels()
@@ -219,102 +139,56 @@ pixels[2, 3] = 1
 sprite.frames[0][sprite.layers[0]] = pixels
 ```
 
-Palettes can change during an animation. `sprite.palette` is the initial
-palette. Set `frame.palette` to a `Palette` to replace it from that frame
-onward; `None` inherits the previous palette. `sprite.palette_at(frame)`
-returns the effective palette. Palette changes, including partial updates
-in existing files, are preserved when reading, rendering, and saving.
+To animate colors, assign a new `Palette` to `frame.palette`.
+Use `sprite.palette_at(frame)` to get the palette effective at a frame.
 
-### Slices and user data
+## Slices and user data
 
-A slice is a named rectangle.
-Keys may include a nine-patch center and a pivot.
+Add named bounds for hitboxes, layout, or export regions:
 
 ```python
-from aseprite import NinePatch, SliceKey
+from aseprite import SliceKey
 
-sprite.add_slice(
-    "box",
-    [
-        SliceKey(
-            frame=0,
-            x=2,
-            y=2,
-            width=12,
-            height=12,
-            nine_patch=NinePatch(1, 1, 10, 10),
-            pivot=(6, 6),
-        )
-    ],
-)
+sprite.add_slice("hitbox", [SliceKey(frame=0, x=2, y=2, width=12, height=12)])
 ```
 
-User data can hold text, a color, and typed properties.
+Attach text, colors, and typed properties to document objects:
 
 ```python
-from aseprite import Color, PropertiesMap, PropertyType, UserData, UserProperty
+from aseprite import PropertiesMap, PropertyType, UserData, UserProperty
 
 sprite.layers[0].user_data = UserData(
     text="npc",
-    color=Color(255, 0, 0),
-    properties=[
-        PropertiesMap(0, [UserProperty("hp", PropertyType.INT32, 10)]),
-    ],
+    properties=[PropertiesMap(0, [UserProperty("hp", PropertyType.INT32, 10)])],
 )
 ```
 
-### Command line
+Detailed behavior, mutation rules, and allocation limits are documented on
+the corresponding APIs. For example, use `help(Sprite.flatten)`,
+`help(Sprite.from_bytes)`, or `help(type(sprite.layers))`.
 
-There is no `aseprite` console script.
-That name belongs to the editor.
+## Examples
+
+These scripts generate their own artwork and use the local package:
+
+- [Export PNG](examples/export_png.py): draw pixels and export a frame.
+- [Indexed animation](examples/indexed_animation.py): animate a palette with linked cels.
+- [Tilemap](examples/tilemap.py): build an embedded tileset and place flipped tiles.
+
+Run an example with `uv run`, optionally passing an output path:
+
+```sh
+uv run examples/indexed_animation.py flame.aseprite
+```
+
+## Command line
 
 ```sh
 python -m aseprite info hero.aseprite
 python -m aseprite export hero.aseprite hero.png --frame 0
 ```
 
-`export` needs the `aseprite[image]` extra.
-
-## Limits
-
-These caps bound memory use when you open or flatten a file.
-
-- A palette may have at most 65,535 colors.
-- Uncompressed cel and tileset pixels in one document may total at most 256 MiB.
-- `flatten()`, `image()`, and `python -m aseprite export` accept at most 67,108,864 pixels (8192×8192).
-
-`python -m aseprite info` still prints metadata when the canvas is larger than that pixel cap.
-
-## Compatibility
-
-`flatten()` uses the same Normal blend arithmetic as Aseprite,
-so its output matches the editor's own PNG export pixel for pixel
-for sprites that only use the Normal blend mode.
-Cels are painted in Aseprite's order:
-layer index plus z-index across the whole layer list.
-
-Indexed sprites are composited the way Aseprite composites them,
-in index space.
-A pixel replaces the one below it unless it is the transparent index
-on a layer that is not a background layer.
-Layer and cel opacity do not apply in indexed mode.
-The palette, including each entry's alpha, is applied at the end.
-
-`Sprite.group_blend` mirrors the header flag that asks for groups
-to be composited with their own opacity and blend mode.
-This library follows the file specification for that flag.
-Aseprite 1.3 ignores it when rendering,
-so that path cannot be checked against the editor yet.
-
-Blend modes, loop directions, color profile types, and external file types
-that this library does not know are kept as `UNKNOWN_<n>` enum members
-and written back unchanged.
-
-Aseprite treats tile 0 of every tileset as the empty tile
-and keeps its image transparent, so leave it transparent
-when you build a tileset with `add_tileset`.
-`blank_pixels()` on an indexed sprite is filled with `transparent_index`.
-Aseprite 1.3 reads only tilemaps with 32 bits per tile.
+`export` requires the `aseprite[image]` extra.
 
 ## Development
 
@@ -326,23 +200,18 @@ uv run ty check
 uv run pytest
 ```
 
-Property-based tests in `tests/test_properties.py` use [Hypothesis][hypothesis].
-They build random documents from every chunk type,
-check that a write and read leaves them unchanged,
-and check that corrupt bytes fail with `FormatError`.
-They run a small number of examples by default.
+The tests use [Hypothesis][hypothesis] for generated documents and include
+regression cases for reading, writing, rendering, and editing.
 Set `HYPOTHESIS_PROFILE=long` for an extended search.
 
+Editor comparisons run when Aseprite is available. On macOS the suite looks
+in `/Applications/Aseprite.app`; set `ASEPRITE_PATH` to use another binary.
+The rest of the suite runs without the editor.
 
-The default test suite does not need the Aseprite application.
-If the editor is present, one test compares `flatten()` to a CLI PNG export.
-On macOS the suite looks in `/Applications/Aseprite.app`.
-Set `ASEPRITE_PATH` to use another binary.
 
 ## License
 
-aseprite is available under the Apache 2.0 license.
-See the [LICENSE](LICENSE) file for more info.
+aseprite is available under the [Apache 2.0 license](LICENSE).
 Aseprite is separate software under its own license.
 
 ## Contact
@@ -351,9 +220,8 @@ Mattt ([@mattt](https://twitter.com/mattt))
 
 [ci]: https://github.com/mattt/aseprite-py/actions/workflows/ci.yml
 [ci badge]: https://github.com/mattt/aseprite-py/actions/workflows/ci.yml/badge.svg
-[license]: https://www.apache.org/licenses/LICENSE-2.0
 [license badge]: https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat
+[license]: https://www.apache.org/licenses/LICENSE-2.0
 [aseprite]: https://www.aseprite.org
 [spec]: https://github.com/aseprite/aseprite/blob/main/docs/ase-file-specs.md
-[aseprite-mcp]: https://github.com/mattt/aseprite-mcp
 [hypothesis]: https://hypothesis.readthedocs.io

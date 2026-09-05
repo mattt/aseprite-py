@@ -28,7 +28,13 @@ class _OpenIntEnum(IntEnum):
 
 
 class ColorMode(IntEnum):
-    """The pixel format of a sprite."""
+    """The pixel format of a sprite.
+
+    Indexed frames are composited in index space: a pixel replaces the one
+    below it unless it is ``Sprite.transparent_index`` on a non-background
+    layer. Layer and cel opacity do not apply; palette colors and their
+    alpha values are applied after compositing.
+    """
 
     RGBA = 32
     GRAYSCALE = 16
@@ -41,7 +47,12 @@ class ColorMode(IntEnum):
 
 
 class BlendMode(_OpenIntEnum):
-    """A layer blend mode from the Aseprite spec."""
+    """A layer blend mode from the Aseprite spec.
+
+    Unrecognized values are preserved as ``UNKNOWN_<n>`` members on read
+    and write. ``Sprite.flatten`` renders all modes as Normal; use Aseprite
+    to export other modes.
+    """
 
     NORMAL = 0
     MULTIPLY = 1
@@ -82,7 +93,11 @@ class CelType(IntEnum):
 
 
 class LoopDirection(_OpenIntEnum):
-    """How an animation tag plays."""
+    """How an animation tag plays.
+
+    Unrecognized values are preserved as ``UNKNOWN_<n>`` members on read
+    and write.
+    """
 
     FORWARD = 0
     REVERSE = 1
@@ -91,7 +106,11 @@ class LoopDirection(_OpenIntEnum):
 
 
 class ColorProfileType(_OpenIntEnum):
-    """The kind of color profile stored in the file."""
+    """The kind of color profile stored in the file.
+
+    Unrecognized values are preserved as ``UNKNOWN_<n>`` members on read
+    and write.
+    """
 
     NONE = 0
     SRGB = 1
@@ -99,7 +118,11 @@ class ColorProfileType(_OpenIntEnum):
 
 
 class ExternalFileType(_OpenIntEnum):
-    """The kind of an external file reference."""
+    """The kind of an external file reference.
+
+    Unrecognized values are preserved as ``UNKNOWN_<n>`` members on read
+    and write.
+    """
 
     PALETTE = 0
     TILESET = 1
@@ -377,6 +400,10 @@ class Layer:
 
     Layers are stored in file order.
     ``child_level`` describes the group tree as specified in NOTE.1 of the format.
+    ``tileset_index`` refers to a ``Tileset.id``, independent of list order.
+    ``opacity`` applies only when ``Sprite.valid_layer_opacity`` is true
+    and the layer is not a background layer. Group opacity additionally
+    requires ``Sprite.group_blend``. Indexed rendering ignores opacity.
     """
 
     name: str
@@ -458,7 +485,10 @@ class Tilemap:
     """Compressed-tilemap cel payload.
 
     Aseprite 1.3 reads only tilemaps with 32 bits per tile. Other widths
-    are valid in the file format but the editor drops those cels.
+    are valid in the file format but the editor drops those cels, so use
+    32 when creating files for the editor. Tile IDs are extracted from
+    ``tile_id_mask`` and shifted down to bit zero. Diagonal flips remain
+    within the original tile dimensions; out-of-bounds samples are empty.
     """
 
     width: int
@@ -842,7 +872,12 @@ class Slice:
 
 @dataclass(slots=True)
 class Tileset:
-    """A tileset referenced by tilemap layers."""
+    """A tileset referenced by tilemap layers via ``id``.
+
+    Embedded pixels are ``tile_width`` by ``tile_height * tile_count``,
+    with tiles stacked vertically. Keep tile 0 transparent when authoring
+    a tileset for Aseprite; the editor reserves it as the empty tile.
+    """
 
     id: int
     name: str
