@@ -218,7 +218,38 @@ def test_flatten_group_blend_isolates_opacity() -> None:
     assert isolated[3] == 128
 
 
+def _layer_and_group(group_first: bool) -> Sprite:
+    sprite = Sprite(1, 1, ColorMode.RGBA, empty=True)
+    if group_first:
+        group = sprite.add_layer("g", kind=LayerType.GROUP)
+        child = sprite.add_layer("c", parent=group)
+        plain = sprite.add_layer("plain")
+    else:
+        plain = sprite.add_layer("plain")
+        group = sprite.add_layer("g", kind=LayerType.GROUP)
+        child = sprite.add_layer("c", parent=group)
+    frame = sprite.add_frame(100)
+    frame.set_cel(plain, Pixels(1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA))
+    frame.set_cel(child, Pixels(1, 1, b"\x00\xff\x00\xff", ColorMode.RGBA))
+    return sprite
+
+
+@pytest.mark.parametrize("isolate", [False, True])
+def test_flatten_group_above_layer_paints_on_top(isolate: bool) -> None:
+    sprite = _layer_and_group(group_first=False)
+    sprite.group_blend = isolate
+    assert sprite.flatten(0) == b"\x00\xff\x00\xff"
+
+
+@pytest.mark.parametrize("isolate", [False, True])
+def test_flatten_group_below_layer_is_covered(isolate: bool) -> None:
+    sprite = _layer_and_group(group_first=True)
+    sprite.group_blend = isolate
+    assert sprite.flatten(0) == b"\xff\x00\x00\xff"
+
+
 def test_flatten_cel_offset_and_clip() -> None:
+
     sprite = Sprite(2, 2, ColorMode.RGBA, empty=True)
     layer = sprite.add_layer("L")
     sprite.add_frame(100).set_cel(

@@ -55,41 +55,14 @@ def _composite_layers(
 ) -> None:
     if depth > MAX_GROUP_DEPTH:
         raise ValueError(f"layer group nesting exceeds {MAX_GROUP_DEPTH} levels")
-    entries: list[tuple[int, int, Layer, Cel]] = []
+    # Groups take part in the same ordering as their sibling image layers,
+    # so a group above an image layer is painted after it.
+    entries: list[tuple[int, int, Layer, Cel | None]] = []
     for layer in layers:
         if not layer.visible:
             continue
         if layer.kind is LayerType.GROUP:
-            if isolate_groups:
-                canvas_bytes = sprite.width * sprite.height * 4
-                if (depth + 1) * canvas_bytes > MAX_UNCOMPRESSED_BYTES:
-                    raise ValueError(
-                        "isolated group compositing exceeds the size limit"
-                    )
-                while len(scratches) <= depth:
-                    scratches.append(bytearray(canvas_bytes))
-                child_buf = scratches[depth]
-                child_buf[:] = b"\x00" * canvas_bytes
-                _composite_layers(
-                    sprite,
-                    frame_index,
-                    sprite.layers.children(layer),
-                    child_buf,
-                    isolate_groups,
-                    scratches,
-                    depth + 1,
-                )
-                _blend_buffer(dest, child_buf, layer.opacity, layer.blend_mode)
-            else:
-                _composite_layers(
-                    sprite,
-                    frame_index,
-                    sprite.layers.children(layer),
-                    dest,
-                    isolate_groups,
-                    scratches,
-                    depth + 1,
-                )
+            entries.append((layer.index, 0, layer, None))
             continue
         cel = _resolve_cel(sprite, layer, frame_index)
         if cel is None:
@@ -98,7 +71,40 @@ def _composite_layers(
         entries.append((order, cel.z_index, layer, cel))
     entries.sort(key=lambda item: (item[0], item[1]))
     for _order, _z, layer, cel in entries:
-        _blit_cel(sprite, layer, cel, dest)
+        if cel is None:
+            _composite_group(
+                sprite, frame_index, layer, dest, isolate_groups, scratches, depth
+            )
+        else:
+            _blit_cel(sprite, layer, cel, dest)
+
+
+def _composite_group(
+    sprite: Sprite,
+    frame_index: int,
+    group: Layer,
+    dest: bytearray,
+    isolate_groups: bool,
+    scratches: list[bytearray],
+    depth: int,
+) -> None:
+    children = sprite.layers.children(group)
+    if not isolate_groups:
+        _composite_layers(
+            sprite, frame_index, children, dest, isolate_groups, scratches, depth + 1
+        )
+        return
+    canvas_bytes = sprite.width * sprite.height * 4
+    if (depth + 1) * canvas_bytes > MAX_UNCOMPRESSED_BYTES:
+        raise ValueError("isolated group compositing exceeds the size limit")
+    while len(scratches) <= depth:
+        scratches.append(bytearray(canvas_bytes))
+    child_buf = scratches[depth]
+    child_buf[:] = b"\x00" * canvas_bytes
+    _composite_layers(
+        sprite, frame_index, children, child_buf, isolate_groups, scratches, depth + 1
+    )
+    _blend_buffer(dest, child_buf, group.opacity, group.blend_mode)
 
 
 def _resolve_cel(sprite: Sprite, layer: Layer, frame_index: int) -> Cel | None:
