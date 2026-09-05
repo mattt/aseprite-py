@@ -221,12 +221,16 @@ def _blit_cel(sprite: Sprite, layer: Layer, cel: Cel, dest: bytearray) -> None:
     if pixels is None:
         return
     opacity = _mul_un8(layer.opacity, cel.opacity)
-    for py in range(pixels.height):
-        for px in range(pixels.width):
+    # Only visit the part of the cel that lands on the canvas, so the cost
+    # is bounded by the canvas size rather than the cel size.
+    x0 = max(0, -cel.x)
+    y0 = max(0, -cel.y)
+    x1 = min(pixels.width, sprite.width - cel.x)
+    y1 = min(pixels.height, sprite.height - cel.y)
+    for py in range(y0, y1):
+        dy = cel.y + py
+        for px in range(x0, x1):
             dx = cel.x + px
-            dy = cel.y + py
-            if dx < 0 or dy < 0 or dx >= sprite.width or dy >= sprite.height:
-                continue
             src = _pixel_rgba(sprite, layer, pixels, px, py)
             di = (dy * sprite.width + dx) * 4
             dest[di : di + 4] = _blend_normal(bytes(dest[di : di + 4]), src, opacity)

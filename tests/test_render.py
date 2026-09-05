@@ -306,6 +306,23 @@ def test_flatten_cel_offset_and_clip() -> None:
     assert clipped.flatten(0)[4:] == b"\x00" * 12
 
 
+def test_flatten_offscreen_cel_costs_only_visible_pixels() -> None:
+    # A 4000x4000 cel with one pixel on a 1x1 canvas. Without clipping the
+    # blit would visit 16 million pixels in Python.
+    sprite = Sprite(1, 1, ColorMode.RGBA, empty=True)
+    layer = sprite.add_layer("big")
+    data = bytearray(4000 * 4000 * 4)
+    data[(3999 * 4000 + 3999) * 4 : (3999 * 4000 + 3999) * 4 + 4] = b"\x01\x02\x03\xff"
+    sprite.add_frame(100).set_cel(
+        layer, Pixels(4000, 4000, bytes(data), ColorMode.RGBA), x=-3999, y=-3999
+    )
+    assert sprite.flatten(0) == b"\x01\x02\x03\xff"
+    sprite.frames[0].set_cel(
+        layer, Pixels(4000, 4000, bytes(data), ColorMode.RGBA), x=1, y=1
+    )
+    assert sprite.flatten(0) == b"\x00\x00\x00\x00"
+
+
 def test_flatten_z_index() -> None:
     sprite = Sprite(1, 1, ColorMode.RGBA, empty=True)
     bottom = sprite.add_layer("bottom")
