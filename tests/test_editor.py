@@ -16,9 +16,7 @@ from tests.helpers import (
 
 FIXTURE = Path(__file__).parent / "fixtures" / "editor.aseprite"
 
-needs_cli = pytest.mark.skipif(
-    aseprite_cli() is None, reason="Aseprite CLI is not available"
-)
+needs_cli = pytest.mark.usefixtures("aseprite_environment")
 
 
 def _cli_export(source: Path, tmp_path: Path, frame: int = 0) -> bytes:

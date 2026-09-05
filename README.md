@@ -214,6 +214,10 @@ Editor comparisons run when Aseprite is available. On macOS the suite looks
 in `/Applications/Aseprite.app`; set `ASEPRITE_PATH` to use another binary.
 The rest of the suite runs without the editor.
 
+On macOS, editor tests prepare a temporary CLI copy once per test session
+to avoid Dock animations. To troubleshoot a launch against the installed
+app directly, use `uv run pytest --aseprite-launch=direct`.
+
 
 ## License
 
