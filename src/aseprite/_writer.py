@@ -12,7 +12,7 @@ from aseprite._binary import (
     HEADER_SIZE,
     Writer,
 )
-from aseprite._limits import MAX_PALETTE_COLORS
+from aseprite._limits import MAX_PADDED_TILE_USER_DATA, MAX_PALETTE_COLORS
 from aseprite._model import (
     HEADER_FLAG_LAYER_UUID,
     TILESET_FLAG_EMBEDDED,
@@ -118,7 +118,7 @@ def write_sprite(sprite: Sprite) -> bytes:
                         uds.pop()
                     if len(uds) > tileset.tile_count:
                         uds = uds[: tileset.tile_count]
-                    if embedded:
+                    if embedded and tileset.tile_count <= MAX_PADDED_TILE_USER_DATA:
                         # Aseprite expects one user-data chunk per tile after
                         # the tileset's own chunk and warns when they are absent.
                         uds.extend([None] * (tileset.tile_count - len(uds)))

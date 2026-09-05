@@ -324,6 +324,25 @@ def test_document_byte_budget(monkeypatch: pytest.MonkeyPatch) -> None:
         Sprite.from_bytes(bytes(header) + payload)
 
 
+def test_huge_embedded_tileset_is_not_padded_with_user_data() -> None:
+    from aseprite._limits import MAX_PADDED_TILE_USER_DATA
+
+    tileset = Writer()
+    tileset.u32(0)
+    tileset.u32(2)
+    tileset.u32(MAX_PADDED_TILE_USER_DATA + 1)
+    tileset.u16(1)
+    tileset.u16(0)
+    tileset.i16(1)
+    tileset.pad(14)
+    tileset.string("t")
+    compressed = zlib.compress(b"")
+    tileset.u32(len(compressed))
+    tileset.raw(compressed)
+    sprite = Sprite.from_bytes(_document(_chunk(CHUNK_TILESET, bytes(tileset.buf))))
+    assert len(sprite.to_bytes()) < 10_000
+
+
 def test_tileset_user_data_write_does_not_pad() -> None:
     tileset = Writer()
     tileset.u32(0)

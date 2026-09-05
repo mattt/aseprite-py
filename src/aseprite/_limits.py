@@ -7,6 +7,9 @@ MAX_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
 MAX_PIXELS = MAX_UNCOMPRESSED_BYTES // 4
 MAX_PALETTE_COLORS = 65_535
 MAX_GROUP_DEPTH = 256
+# Aseprite expects one user-data chunk per tile after an embedded tileset.
+# Pad up to this many tiles; a larger count only occurs in corrupt files.
+MAX_PADDED_TILE_USER_DATA = 1 << 20
 
 
 class DocumentBudget:
