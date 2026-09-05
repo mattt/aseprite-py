@@ -50,7 +50,7 @@ def _flatten_indexed(sprite: Sprite, frame_index: int, layers: list[Layer]) -> b
     """
     width, height = sprite.width, sprite.height
     indices = bytearray(width * height)
-    painted = bytearray(width * height)
+    painted = bytearray(width * height)  # 0xFF where a pixel was painted
     for _order, _z, layer, cel in _collect_entries(
         sprite, frame_index, layers, False, 0
     ):
@@ -73,13 +73,30 @@ def _flatten_indexed(sprite: Sprite, frame_index: int, layers: list[Layer]) -> b
                 if index == skip:
                     continue
                 indices[dest_row + px] = index
-                painted[dest_row + px] = 1
-    out = bytearray(width * height * 4)
+                painted[dest_row + px] = 0xFF
+    return _apply_palette(sprite, indices, painted)
+
+
+def _apply_palette(sprite: Sprite, indices: bytearray, painted: bytearray) -> bytes:
+    """Maps palette indices to RGBA bytes without a per-pixel Python loop."""
     palette = sprite.palette.colors
-    for i in range(width * height):
-        if painted[i] and indices[i] < len(palette):
-            color = palette[indices[i]]
-            out[i * 4 : i * 4 + 4] = bytes((color.r, color.g, color.b, color.a))
+    tables = []
+    for channel in range(4):
+        table = bytearray(256)
+        for index, color in enumerate(palette[:256]):
+            table[index] = (color.r, color.g, color.b, color.a)[channel]
+        tables.append(bytes(table))
+    total = len(indices)
+    out = bytearray(total * 4)
+    step = 1 << 16
+    for start in range(0, total, step):
+        chunk = bytes(indices[start : start + step])
+        mask = int.from_bytes(painted[start : start + step], "big")
+        for channel in range(4):
+            values = int.from_bytes(chunk.translate(tables[channel]), "big") & mask
+            out[start * 4 + channel : (start + len(chunk)) * 4 : 4] = values.to_bytes(
+                len(chunk), "big"
+            )
     return bytes(out)
 
 

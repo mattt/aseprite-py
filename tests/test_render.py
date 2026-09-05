@@ -70,6 +70,18 @@ def test_flatten_indexed_replaces_indices_and_ignores_opacity() -> None:
     assert indexed_overlap_sprite().flatten(0) == INDEXED_OVERLAP_EXPECTED
 
 
+def test_flatten_indexed_large_canvas_maps_palette_in_chunks() -> None:
+    sprite = Sprite(300, 300, ColorMode.INDEXED)
+    sprite.palette.extend([Color(0, 0, 0, 0), Color(10, 20, 30, 40)])
+    pixels = sprite.blank_pixels(2, 1)
+    pixels[1, 0] = 1
+    sprite.frames[0].set_cel(sprite.layers[0], pixels, 298, 299)
+    data = sprite.flatten(0)
+    assert data[-8:-4] == b"\x00\x00\x00\x00"
+    assert data[-4:] == b"\x0a\x14\x1e\x28"
+    assert data.count(b"\x0a\x14\x1e\x28") == 1
+
+
 def test_flatten_indexed_z_index_and_groups() -> None:
     sprite = Sprite(1, 1, ColorMode.INDEXED, empty=True)
     sprite.palette.extend([Color(0, 0, 0, 0), Color(255, 0, 0), Color(0, 255, 0)])
