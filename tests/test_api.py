@@ -170,7 +170,21 @@ def test_insert_layer_shifts_cels() -> None:
     assert bytes(cel.pixels.data) == b"\xff\x00\x00\xff"
 
 
+def test_invalid_layer_opacity_flag_reads_as_opaque() -> None:
+    sprite = Sprite(1, 1)
+    sprite.valid_layer_opacity = False
+    sprite.layers[0].opacity = 0
+    sprite.frames[0][sprite.layers[0]] = Pixels(
+        1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA
+    )
+    again = Sprite.from_bytes(sprite.to_bytes())
+    assert again.valid_layer_opacity is False
+    assert again.layers[0].opacity == 255
+    assert again.flatten(0) == b"\xff\x00\x00\xff"
+
+
 def test_layer_opacity_flag_roundtrip() -> None:
+
     sprite = Sprite(1, 1)
     sprite.valid_layer_opacity = False
     loaded = Sprite.from_bytes(sprite.to_bytes())

@@ -183,7 +183,12 @@ def read_sprite(data: bytes) -> Sprite:
                     sprite_ud_pending = True
             elif chunk_type == CHUNK_LAYER:
                 layer = _read_layer(payload, bool(flags & HEADER_FLAG_LAYER_UUID))
+                if not sprite.valid_layer_opacity:
+                    # Aseprite ignores the stored byte unless the header
+                    # flag says layer opacity is valid.
+                    layer.opacity = 255
                 layer.index = len(sprite.layers)
+
                 sprite.layers.append(layer)
                 last_layer = layer
                 last_cel = None

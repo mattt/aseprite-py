@@ -68,6 +68,17 @@ def test_blend_matches_cli(tmp_path: Path) -> None:
 
 
 @needs_cli
+def test_invalid_layer_opacity_flag_matches_cli(tmp_path: Path) -> None:
+    sprite = Sprite(2, 2)
+    sprite.valid_layer_opacity = False
+    sprite.layers[0].opacity = 0
+    pixels = sprite.blank_pixels()
+    pixels[0, 0] = (255, 0, 0, 255)
+    sprite.frames[0][sprite.layers[0]] = pixels
+    _assert_flatten_matches_cli(sprite, tmp_path)
+
+
+@needs_cli
 def test_group_above_layer_matches_cli(tmp_path: Path) -> None:
 
     sprite = Sprite(2, 2)
