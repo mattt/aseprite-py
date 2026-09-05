@@ -306,6 +306,26 @@ def test_flatten_cel_offset_and_clip() -> None:
     assert clipped.flatten(0)[4:] == b"\x00" * 12
 
 
+def _z_index_across_group() -> Sprite:
+    sprite = Sprite(1, 1, ColorMode.RGBA, empty=True)
+    group = sprite.add_layer("g", kind=LayerType.GROUP)
+    child = sprite.add_layer("child", parent=group)
+    plain = sprite.add_layer("plain")
+    frame = sprite.add_frame(100)
+    # child is layer 1 with z-index 2 (order 3); plain is layer 2 (order 2).
+    frame.set_cel(child, Pixels(1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA), z_index=2)
+    frame.set_cel(plain, Pixels(1, 1, b"\x00\xff\x00\xff", ColorMode.RGBA))
+    return sprite
+
+
+def test_flatten_z_index_crosses_group_boundary() -> None:
+    sprite = _z_index_across_group()
+    assert sprite.flatten(0) == b"\xff\x00\x00\xff"
+    # Isolated groups keep their children together.
+    sprite.group_blend = True
+    assert sprite.flatten(0) == b"\x00\xff\x00\xff"
+
+
 def test_flatten_offscreen_cel_costs_only_visible_pixels() -> None:
     # A 4000x4000 cel with one pixel on a 1x1 canvas. Without clipping the
     # blit would visit 16 million pixels in Python.

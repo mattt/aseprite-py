@@ -53,23 +53,7 @@ def _composite_layers(
     scratches: list[bytearray],
     depth: int = 0,
 ) -> None:
-    if depth > MAX_GROUP_DEPTH:
-        raise ValueError(f"layer group nesting exceeds {MAX_GROUP_DEPTH} levels")
-    # Groups take part in the same ordering as their sibling image layers,
-    # so a group above an image layer is painted after it.
-    entries: list[tuple[int, int, Layer, Cel | None]] = []
-    for layer in layers:
-        if not layer.visible:
-            continue
-        if layer.kind is LayerType.GROUP:
-            entries.append((layer.index, 0, layer, None))
-            continue
-        cel = _resolve_cel(sprite, layer, frame_index)
-        if cel is None:
-            continue
-        order = layer.index + cel.z_index
-        entries.append((order, cel.z_index, layer, cel))
-    entries.sort(key=lambda item: (item[0], item[1]))
+    entries = _collect_entries(sprite, frame_index, layers, isolate_groups, depth)
     for _order, _z, layer, cel in entries:
         if cel is None:
             _composite_group(
@@ -77,6 +61,48 @@ def _composite_layers(
             )
         else:
             _blit_cel(sprite, layer, cel, dest)
+
+
+def _collect_entries(
+    sprite: Sprite,
+    frame_index: int,
+    layers: list[Layer],
+    isolate_groups: bool,
+    depth: int,
+) -> list[tuple[int, int, Layer, Cel | None]]:
+    """Returns the visible cels under ``layers`` in paint order.
+
+    Aseprite sorts cels by ``layer index + z-index`` across the whole layer
+    list, so a z-index can move a cel past a group boundary. When groups are
+    isolated, each group is one entry and its children are sorted on their
+    own.
+    """
+    if depth > MAX_GROUP_DEPTH:
+        raise ValueError(f"layer group nesting exceeds {MAX_GROUP_DEPTH} levels")
+    entries: list[tuple[int, int, Layer, Cel | None]] = []
+    for layer in layers:
+        if not layer.visible:
+            continue
+        if layer.kind is LayerType.GROUP:
+            if isolate_groups:
+                entries.append((layer.index, 0, layer, None))
+            else:
+                entries.extend(
+                    _collect_entries(
+                        sprite,
+                        frame_index,
+                        sprite.layers.children(layer),
+                        isolate_groups,
+                        depth + 1,
+                    )
+                )
+            continue
+        cel = _resolve_cel(sprite, layer, frame_index)
+        if cel is None:
+            continue
+        entries.append((layer.index + cel.z_index, cel.z_index, layer, cel))
+    entries.sort(key=lambda item: (item[0], item[1]))
+    return entries
 
 
 def _composite_group(

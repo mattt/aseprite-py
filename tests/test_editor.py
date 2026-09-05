@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from aseprite import ColorMode, LayerType, Sprite
+from aseprite import ColorMode, LayerType, Pixels, Sprite
 from tests.helpers import aseprite_cli, blend_sprite
 
 FIXTURE = Path(__file__).parent / "fixtures" / "editor.aseprite"
@@ -75,6 +75,18 @@ def test_invalid_layer_opacity_flag_matches_cli(tmp_path: Path) -> None:
     pixels = sprite.blank_pixels()
     pixels[0, 0] = (255, 0, 0, 255)
     sprite.frames[0][sprite.layers[0]] = pixels
+    _assert_flatten_matches_cli(sprite, tmp_path)
+
+
+@needs_cli
+def test_z_index_across_group_matches_cli(tmp_path: Path) -> None:
+    sprite = Sprite(1, 1, ColorMode.RGBA, empty=True)
+    group = sprite.add_layer("g", kind=LayerType.GROUP)
+    child = sprite.add_layer("child", parent=group)
+    plain = sprite.add_layer("plain")
+    frame = sprite.add_frame(100)
+    frame.set_cel(child, Pixels(1, 1, b"\xff\x00\x00\xa0", ColorMode.RGBA), z_index=2)
+    frame.set_cel(plain, Pixels(1, 1, b"\x00\xff\x00\xa0", ColorMode.RGBA))
     _assert_flatten_matches_cli(sprite, tmp_path)
 
 
