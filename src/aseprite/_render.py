@@ -226,7 +226,12 @@ def _tiles_to_pixels(sprite: Sprite, layer: Layer, cel: Cel) -> Pixels | None:
     out_h = (tm.height - 1) * th + max(tw, th) if tm.height else 0
     if out_w < 0 or out_h < 0 or out_w * out_h > MAX_PIXELS:
         raise ValueError(f"tilemap exceeds {MAX_PIXELS} pixels")
-    out = bytearray(out_w * out_h * bpp)
+    if sprite.color_mode is ColorMode.INDEXED:
+        # Empty and out-of-range tiles are transparent, which in indexed
+        # mode means the transparent index rather than index 0.
+        out = bytearray((sprite.transparent_index,)) * (out_w * out_h)
+    else:
+        out = bytearray(out_w * out_h * bpp)
     tile_bytes = tw * th * bpp
     stride = bytes_per_tile(tm.bits_per_tile)
     pixel_data = tileset.pixels.data if tileset.pixels is not None else b""

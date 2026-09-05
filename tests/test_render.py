@@ -70,6 +70,25 @@ def test_flatten_indexed_replaces_indices_and_ignores_opacity() -> None:
     assert indexed_overlap_sprite().flatten(0) == INDEXED_OVERLAP_EXPECTED
 
 
+def test_flatten_indexed_tilemap_empty_tiles_use_transparent_index() -> None:
+    sprite = Sprite(4, 1, ColorMode.INDEXED, empty=True)
+    sprite.palette.extend([Color(9, 9, 9), Color(0, 0, 0, 0), Color(255, 0, 0)])
+    sprite.transparent_index = 1
+    sprite.add_tileset(
+        "tiles", 1, 1, 2, pixels=Pixels(1, 2, b"\x01\x02", ColorMode.INDEXED)
+    )
+    layer = sprite.add_layer("map", kind=LayerType.TILEMAP, tileset_index=0)
+    # tile 0 (empty), tile 1 (red), tile 7 (out of range), tile 0 again
+    tiles = b"".join(t.to_bytes(4, "little") for t in (0, 1, 7, 0))
+    sprite.add_frame(100).set_tilemap_cel(
+        layer,
+        Tilemap(4, 1, 32, 0x1FFFFFFF, 0x20000000, 0x40000000, 0x80000000, tiles),
+    )
+    assert sprite.flatten(0) == (
+        b"\x00\x00\x00\x00\xff\x00\x00\xff\x00\x00\x00\x00\x00\x00\x00\x00"
+    )
+
+
 def test_flatten_indexed_large_canvas_maps_palette_in_chunks() -> None:
     sprite = Sprite(300, 300, ColorMode.INDEXED)
     sprite.palette.extend([Color(0, 0, 0, 0), Color(10, 20, 30, 40)])
