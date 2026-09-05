@@ -251,6 +251,55 @@ def test_pixels_type_errors() -> None:
         indexed[0, 0] = bad_value
 
 
+def test_pixels_reject_out_of_range_values() -> None:
+    rgba = Pixels.blank(1, 1, ColorMode.RGBA)
+    with pytest.raises(ValueError, match="out of range"):
+        rgba[0, 0] = (300, 0, 0)
+    with pytest.raises(ValueError, match="out of range"):
+        rgba[0, 0] = Color(0, 0, 0, -1)
+    gray = Pixels.blank(1, 1, ColorMode.GRAYSCALE)
+    with pytest.raises(ValueError, match="out of range"):
+        gray[0, 0] = (256, 255)
+    indexed = Pixels.blank(1, 1, ColorMode.INDEXED)
+    with pytest.raises(ValueError, match="out of range"):
+        indexed[0, 0] = 256
+    bad_channel: Any = ("1", 0, 0)
+    with pytest.raises(TypeError, match="integers"):
+        rgba[0, 0] = bad_channel
+
+
+def test_write_rejects_mismatched_pixel_color_mode() -> None:
+    sprite = Sprite(2, 2, ColorMode.INDEXED)
+    sprite.frames[0][sprite.layers[0]] = Pixels.blank(2, 2, ColorMode.RGBA)
+    with pytest.raises(ValueError, match="RGBA but the sprite is INDEXED"):
+        sprite.to_bytes()
+
+
+def test_add_layer_rejects_non_group_parent() -> None:
+    sprite = Sprite(1, 1)
+    with pytest.raises(ValueError, match="not a group"):
+        sprite.add_layer("child", parent=sprite.layers[0])
+
+
+def test_add_tileset_rejects_mismatched_color_mode() -> None:
+    sprite = Sprite(8, 8, ColorMode.INDEXED)
+    with pytest.raises(ValueError, match="RGBA but the sprite is INDEXED"):
+        sprite.add_tileset("tiles", 8, 8, 1, pixels=Pixels.blank(8, 8, ColorMode.RGBA))
+    sprite.tilesets.append(
+        Tileset(
+            id=0,
+            name="t",
+            tile_count=1,
+            tile_width=8,
+            tile_height=8,
+            flags=TILESET_FLAG_EMBEDDED,
+            pixels=Pixels.blank(8, 8, ColorMode.RGBA),
+        )
+    )
+    with pytest.raises(ValueError, match="RGBA but the sprite is INDEXED"):
+        sprite.to_bytes()
+
+
 def test_pixels_buffer() -> None:
     pixels = Pixels.blank(1, 1, ColorMode.RGBA)
     view = memoryview(pixels)

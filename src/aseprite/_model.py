@@ -209,27 +209,50 @@ class Pixels:
         return memoryview(self.data)
 
 
+def _check_color_mode(pixels: Pixels, color_mode: ColorMode, what: str) -> None:
+    """Raises ``ValueError`` if ``pixels`` are not in the sprite's color mode."""
+    if pixels.color_mode is not color_mode:
+        raise ValueError(
+            f"{what} pixels are {pixels.color_mode.name} "
+            f"but the sprite is {color_mode.name}"
+        )
+
+
+def _channel(value: object) -> int:
+    if not isinstance(value, int):
+        raise TypeError("pixel channel values must be integers")
+    if not 0 <= value <= 255:
+        raise ValueError(f"pixel channel value {value} is out of range 0..255")
+    return value
+
+
 def _pack_pixel(color_mode: ColorMode, value: Color | Sequence[int] | int) -> bytes:
     if color_mode is ColorMode.INDEXED:
         if isinstance(value, int):
-            return bytes((value & 0xFF,))
+            return bytes((_channel(value),))
         if isinstance(value, Color):
-            return bytes((value.r & 0xFF,))
+            return bytes((_channel(value.r),))
         if isinstance(value, Sequence) and len(value) >= 1:
-            return bytes((int(value[0]) & 0xFF,))
+            return bytes((_channel(value[0]),))
         raise TypeError("indexed pixel must be an integer")
     if color_mode is ColorMode.GRAYSCALE:
         if isinstance(value, Color):
-            return bytes((value.r & 0xFF, value.a & 0xFF))
+            return bytes((_channel(value.r), _channel(value.a)))
         if isinstance(value, Sequence) and len(value) >= 2:
-            return bytes((int(value[0]) & 0xFF, int(value[1]) & 0xFF))
+            return bytes((_channel(value[0]), _channel(value[1])))
         raise TypeError("grayscale pixel must be (value, alpha)")
     if isinstance(value, Color):
-        return bytes((value.r, value.g, value.b, value.a))
+        return bytes(_channel(component) for component in value)
     if isinstance(value, Sequence) and len(value) >= 3:
-        red, green, blue = int(value[0]), int(value[1]), int(value[2])
-        alpha = int(value[3]) if len(value) > 3 else 255
-        return bytes((red, green, blue, alpha))
+        alpha = value[3] if len(value) > 3 else 255
+        return bytes(
+            (
+                _channel(value[0]),
+                _channel(value[1]),
+                _channel(value[2]),
+                _channel(alpha),
+            )
+        )
     raise TypeError("RGBA pixel must be a Color or (r, g, b, a)")
 
 

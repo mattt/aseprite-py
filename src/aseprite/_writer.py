@@ -23,6 +23,7 @@ from aseprite._model import (
     Palette,
     Pixels,
     UserData,
+    _check_color_mode,
 )
 from aseprite._userdata import write_user_data
 
@@ -133,7 +134,9 @@ def write_sprite(sprite: Sprite) -> bytes:
                     )
 
         for cel in frame.cels:
-            emit_built(CHUNK_CEL, lambda iw, c=cel: _write_cel(iw, c))
+            emit_built(
+                CHUNK_CEL, lambda iw, c=cel: _write_cel(iw, c, sprite.color_mode)
+            )
             if cel.extra is not None:
                 emit_built(CHUNK_CEL_EXTRA, lambda iw, c=cel: _write_cel_extra(iw, c))
             cel_ud = cel.user_data
@@ -271,7 +274,7 @@ def _compress(data: bytes | bytearray, original: bytes | None) -> bytes:
     return zlib.compress(data, 9)
 
 
-def _write_cel(w: Writer, cel) -> None:  # noqa: ANN001
+def _write_cel(w: Writer, cel, color_mode: ColorMode) -> None:  # noqa: ANN001
     w.u16(cel.layer_index)
     w.i16(cel.x)
     w.i16(cel.y)
@@ -300,6 +303,7 @@ def _write_cel(w: Writer, cel) -> None:  # noqa: ANN001
     pixels: Pixels | None = cel.pixels
     if pixels is None:
         raise ValueError("cel has no pixel data")
+    _check_color_mode(pixels, color_mode, "cel")
     if cel.raw:
         w.u16(0)
         w.i16(cel.z_index)
@@ -432,6 +436,7 @@ def _write_tileset(w: Writer, tileset, color_mode: ColorMode) -> None:  # noqa: 
             raise ValueError(
                 "embedded tileset image size does not match tile dimensions"
             )
+        _check_color_mode(pixels, color_mode, "tileset")
         compressed = _compress(pixels.data, tileset.compressed)
         w.u32(len(compressed))
         w.raw(compressed)

@@ -33,6 +33,7 @@ from aseprite._model import (
     TilesetList,
     UnknownChunk,
     UserData,
+    _check_color_mode,
 )
 
 if TYPE_CHECKING:
@@ -228,7 +229,12 @@ class Sprite:
             blend_mode: The layer blend mode.
             opacity: Layer opacity from 0 to 255.
             tileset_index: The tileset referenced by a tilemap layer.
+
+        Raises:
+            ValueError: If ``parent`` is not a group layer.
         """
+        if parent is not None and parent.kind is not LayerType.GROUP:
+            raise ValueError(f"parent layer {parent.name!r} is not a group")
         layer = Layer(
             name=name,
             kind=kind,
@@ -322,6 +328,7 @@ class Sprite:
             expected_height = tile_height * tile_count
             if pixels.width != tile_width or pixels.height != expected_height:
                 raise ValueError("tileset image size does not match tile dimensions")
+            _check_color_mode(pixels, self.color_mode, "tileset")
             flags |= TILESET_FLAG_EMBEDDED
         tileset = Tileset(
             id=len(self.tilesets) if tileset_id is None else tileset_id,
