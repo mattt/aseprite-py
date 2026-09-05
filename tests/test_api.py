@@ -55,7 +55,7 @@ def test_named_collections() -> None:
     sprite.add_tileset("tiles", 2, 2, 1)
     loaded = Sprite.from_bytes(sprite.to_bytes())
     assert loaded.tilesets["tiles"].tile_width == 2
-    assert loaded.tilesets["tiles"].pixels is None
+    assert loaded.tilesets["tiles"].pixels is not None
     assert "idle" in sprite.tags
     assert sprite.tags.get("missing") is None
     assert sprite.tags.get("idle") is sprite.tags[0]
@@ -363,14 +363,16 @@ def test_frame_missing_cel() -> None:
         sprite.frames[0][99]
 
 
-def test_add_tileset_without_pixels_roundtrips() -> None:
+def test_add_tileset_without_pixels_embeds_blank_image() -> None:
     sprite = Sprite(8, 8)
-    sprite.add_tileset("tiles", 8, 8, 1)
+    sprite.add_tileset("tiles", 8, 8, 2)
     loaded = Sprite.from_bytes(sprite.to_bytes())
     tileset = loaded.tilesets[0]
     assert tileset.name == "tiles"
-    assert tileset.pixels is None
-    assert not (tileset.flags & TILESET_FLAG_EMBEDDED)
+    assert tileset.flags & TILESET_FLAG_EMBEDDED
+    assert tileset.pixels is not None
+    assert (tileset.pixels.width, tileset.pixels.height) == (8, 16)
+    assert bytes(tileset.pixels.data) == bytes(8 * 16 * 4)
 
 
 def test_add_tileset_with_pixels_roundtrips() -> None:

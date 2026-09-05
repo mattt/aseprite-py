@@ -321,18 +321,20 @@ class Sprite:
             tile_width: Width of one tile, in pixels.
             tile_height: Height of one tile, in pixels.
             tile_count: The number of tiles.
-            pixels: Optional embedded tile image.
+            pixels: The embedded tile image.
                 Width must be ``tile_width``.
                 Height must be ``tile_height * tile_count``.
+                The default is a blank image, because Aseprite drops
+                tilemap layers whose tileset has no image.
             tileset_id: File-format tileset ID. The default is the next index.
         """
-        flags = TILESET_FLAG_EMPTY_IS_ZERO
-        if pixels is not None:
-            expected_height = tile_height * tile_count
-            if pixels.width != tile_width or pixels.height != expected_height:
-                raise ValueError("tileset image size does not match tile dimensions")
-            _check_color_mode(pixels, self.color_mode, "tileset")
-            flags |= TILESET_FLAG_EMBEDDED
+        expected_height = tile_height * tile_count
+        if pixels is None:
+            pixels = Pixels.blank(tile_width, expected_height, self.color_mode)
+        if pixels.width != tile_width or pixels.height != expected_height:
+            raise ValueError("tileset image size does not match tile dimensions")
+        _check_color_mode(pixels, self.color_mode, "tileset")
+        flags = TILESET_FLAG_EMBEDDED | TILESET_FLAG_EMPTY_IS_ZERO
         tileset = Tileset(
             id=len(self.tilesets) if tileset_id is None else tileset_id,
             name=name,
