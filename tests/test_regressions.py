@@ -2,7 +2,7 @@ import struct
 
 import pytest
 
-from aseprite import Color, ColorMode, FormatError, Palette, Pixels, Sprite
+from aseprite import Color, ColorMode, FormatError, LayerType, Palette, Pixels, Sprite
 from tests.helpers import _chunk, _document, legacy_palette_document, tilemap_sprite
 
 
@@ -129,6 +129,70 @@ def test_create_palette_animation() -> None:
     ]
     with pytest.raises(IndexError):
         sprite.palette_at(-1)
+
+
+def test_layer_swap_rejected_before_cels_are_changed() -> None:
+    sprite = Sprite(1, 1)
+    first = sprite.layers[0]
+    second = sprite.add_layer("second")
+    sprite.frames[0][first] = Pixels(1, 1, b"\xff\x00\x00\xff", ColorMode.RGBA)
+    sprite.frames[0][second] = Pixels(1, 1, b"\x00\xff\x00\xff", ColorMode.RGBA)
+    sprite.add_frame().set_linked_cel(first, 0)
+    sprite.frames[1].set_linked_cel(second, 0)
+    original = sprite.to_bytes()
+    with pytest.raises(ValueError, match="same layer"):
+        sprite.layers[0], sprite.layers[1] = sprite.layers[1], sprite.layers[0]
+    assert sprite.to_bytes() == original
+    # A slice assignment supplies the whole permutation atomically.
+    sprite.layers[:] = [second, first]
+    for frame in range(2):
+        assert sprite.flatten(frame) == b"\xff\x00\x00\xff"
+        assert len(sprite.frames[frame].cels) == 2
+
+
+@pytest.mark.parametrize("operation", ["append", "insert", "slice"])
+def test_duplicate_layer_mutations_leave_document_intact(operation: str) -> None:
+    sprite = Sprite(1, 1)
+    layer = sprite.layers[0]
+    sprite.frames[0][layer] = sprite.blank_pixels()
+    original = sprite.to_bytes()
+    with pytest.raises(ValueError, match="same layer"):
+        if operation == "append":
+            sprite.layers.append(layer)
+        elif operation == "insert":
+            sprite.layers.insert(0, layer)
+        else:
+            sprite.layers[:] = [layer, layer]
+    assert sprite.to_bytes() == original
+
+
+def test_reverse_keeps_nested_group_subtrees_intact() -> None:
+    sprite = Sprite(1, 1)
+    base = sprite.layers[0]
+    group = sprite.add_layer("group", kind=LayerType.GROUP)
+    child = sprite.add_layer("child", parent=group)
+    nested = sprite.add_layer("nested", kind=LayerType.GROUP, parent=group)
+    leaf = sprite.add_layer("leaf", parent=nested)
+    top = sprite.add_layer("top")
+    image_layers = [base, child, leaf, top]
+    for i, layer in enumerate(image_layers):
+        sprite.frames[0][layer] = Pixels(
+            1, 1, bytes((i + 1, 0, 0, 255)), ColorMode.RGBA
+        )
+    frame = sprite.add_frame()
+    for layer in image_layers:
+        frame.set_linked_cel(layer, 0)
+    original = sprite.to_bytes()
+    sprite.layers.reverse()
+    assert list(sprite.layers) == [top, group, child, nested, leaf, base]
+    assert sprite.layers.children(group) == [child, nested]
+    assert sprite.layers.children(nested) == [leaf]
+    for document in (sprite, Sprite.from_bytes(sprite.to_bytes())):
+        for index in range(2):
+            assert document.flatten(index) == b"\x01\x00\x00\xff"
+            assert len(document.frames[index].cels) == 4
+    sprite.layers.reverse()
+    assert sprite.to_bytes() == original
 
 
 @pytest.mark.parametrize("old", [False, True])

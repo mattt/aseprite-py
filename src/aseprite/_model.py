@@ -717,7 +717,14 @@ class TagList(_NamedList[Tag]):
 
 
 class LayerList(_NamedList[Layer]):
-    """A sequence of layers that supports lookup by name or index."""
+    """Layers in file order, with lookup by name or index.
+
+    To reorder layers, assign the complete order in one slice operation,
+    e.g. ``layers[:] = [second, first]``. Assigning a layer that would appear
+    twice raises ``ValueError`` before any cels are changed; this includes
+    the intermediate assignment in a tuple swap. Keep each group's
+    descendants immediately after it, with their existing ``child_level``.
+    """
 
     def __init__(
         self,
@@ -729,7 +736,32 @@ class LayerList(_NamedList[Layer]):
         self._prev: list[Layer] = []
         super().__init__(items)
 
+    @staticmethod
+    def _check_unique(items: list[Layer]) -> None:
+        if len({id(layer) for layer in items}) != len(items):
+            raise ValueError(
+                "the same layer cannot appear twice; reorder with slice assignment"
+            )
+
+    def __setitem__(self, key: int | slice, value: Layer | Iterable[Layer]) -> None:
+        items = list(self._items)
+        if isinstance(key, slice):
+            items[key] = list(cast(Iterable[Layer], value))
+        else:
+            items[key] = cast(Layer, value)
+        self._check_unique(items)
+        self._items = items
+        self._after_mutate()
+
+    def insert(self, index: int, value: Layer) -> None:
+        if any(layer is value for layer in self._items):
+            raise ValueError(
+                "the same layer cannot appear twice; reorder with slice assignment"
+            )
+        super().insert(index, value)
+
     def _after_mutate(self) -> None:
+        self._check_unique(self._items)
         old_index = {id(layer): i for i, layer in enumerate(self._prev)}
         mapping: dict[int, int | None] = dict.fromkeys(range(len(self._prev)))
         for new_index, layer in enumerate(self._items):
@@ -743,8 +775,19 @@ class LayerList(_NamedList[Layer]):
             self._on_remap(mapping)
 
     def reverse(self) -> None:
-        """Reverses layer order while preserving every layer's cels."""
-        self._items.reverse()
+        """Reverses top-level layers, keeping each group's subtree intact.
+
+        Child order and cel associations are preserved. Calling twice
+        restores the original order, including nested groups.
+        """
+        blocks: list[list[Layer]] = []
+        for layer in self._items:
+            if layer.child_level == 0:
+                blocks.append([])
+            if not blocks:
+                raise ValueError("cannot reverse layers with an orphaned child")
+            blocks[-1].append(layer)
+        self._items = [layer for block in reversed(blocks) for layer in block]
         self._after_mutate()
 
     def children(self, group: Layer) -> list[Layer]:
