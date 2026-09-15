@@ -84,7 +84,7 @@ def test_isolated_group_ignores_invalid_opacity() -> None:
 
 
 @pytest.mark.parametrize("size", [(2, 1), (1, 2)])
-@pytest.mark.parametrize("flips", [4, 5, 6, 7])
+@pytest.mark.parametrize("flips", [1, 3, 5, 7])
 @pytest.mark.parametrize("mode", [ColorMode.RGBA, ColorMode.INDEXED])
 def test_rectangular_diagonal_flip_stays_in_tile(
     size: tuple[int, int], flips: int, mode: ColorMode
@@ -92,7 +92,7 @@ def test_rectangular_diagonal_flip_stays_in_tile(
     sprite = rectangular_tile_sprite(*size, flips, mode)
     # Editor output retains the first pixel, mirrored inside the original
     # tile footprint. The second pixel falls outside that footprint.
-    x = size[0] - 1 if flips & 1 else 0
+    x = size[0] - 1 if flips & 4 else 0
     y = size[1] - 1 if flips & 2 else 0
     expected = bytearray(36)
     offset = (y * 3 + x) * 4
@@ -167,7 +167,7 @@ def test_flatten_indexed_tilemap_empty_tiles_use_transparent_index() -> None:
     tiles = b"".join(t.to_bytes(4, "little") for t in (0, 1, 7, 0))
     sprite.add_frame(100).set_tilemap_cel(
         layer,
-        Tilemap(4, 1, 32, 0x1FFFFFFF, 0x20000000, 0x40000000, 0x80000000, tiles),
+        Tilemap(4, 1, 32, 0x1FFFFFFF, 0x80000000, 0x40000000, 0x20000000, tiles),
     )
     assert sprite.flatten(0) == (
         b"\x00\x00\x00\x00\xff\x00\x00\xff\x00\x00\x00\x00\x00\x00\x00\x00"
@@ -267,9 +267,9 @@ def test_flatten_rejects_huge_tilemap() -> None:
             height=256,
             bits_per_tile=32,
             tile_id_mask=0x1FFFFFFF,
-            x_flip_mask=0x20000000,
+            x_flip_mask=0x80000000,
             y_flip_mask=0x40000000,
-            d_flip_mask=0x80000000,
+            d_flip_mask=0x20000000,
             tiles=b"",
         ),
     )
@@ -323,6 +323,33 @@ def test_flatten_tilemap_d_flip() -> None:
     )
 
 
+@pytest.mark.parametrize("bits_per_tile", [8, 16, 32])
+@pytest.mark.parametrize(
+    ("flip", "expected"),
+    [
+        ("x", TILE_TR + TILE_TL + TILE_BR + TILE_BL),
+        ("y", TILE_BL + TILE_BR + TILE_TL + TILE_TR),
+        ("d", TILE_TL + TILE_BL + TILE_TR + TILE_BR),
+    ],
+)
+def test_custom_tile_flip_masks_survive_roundtrip(
+    bits_per_tile: int, flip: str, expected: bytes
+) -> None:
+    sprite = tilemap_sprite(bits_per_tile=bits_per_tile)
+    tilemap = sprite.frames[0].cels[0].tilemap
+    assert tilemap is not None
+    tilemap.x_flip_mask, tilemap.d_flip_mask = (
+        tilemap.d_flip_mask,
+        tilemap.x_flip_mask,
+    )
+    value = getattr(tilemap, f"{flip}_flip_mask")
+    tilemap.tiles = value.to_bytes(bits_per_tile // 8, "little")
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    assert loaded.frames[0].cels[0].tilemap == tilemap
+    assert sprite.flatten() == expected
+    assert loaded.flatten() == expected
+
+
 def test_flatten_tilemap_d_flip_nonsquare() -> None:
     sprite = Sprite(2, 2, ColorMode.RGBA, empty=True)
     sprite.tilesets.append(
@@ -344,10 +371,10 @@ def test_flatten_tilemap_d_flip_nonsquare() -> None:
             height=1,
             bits_per_tile=32,
             tile_id_mask=0x1FFFFFFF,
-            x_flip_mask=0x20000000,
+            x_flip_mask=0x80000000,
             y_flip_mask=0x40000000,
-            d_flip_mask=0x80000000,
-            tiles=(0x80000000).to_bytes(4, "little"),
+            d_flip_mask=0x20000000,
+            tiles=(0x20000000).to_bytes(4, "little"),
         ),
     )
     data = sprite.flatten(0)

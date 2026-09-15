@@ -175,9 +175,9 @@ def test_tileset_and_tilemap() -> None:
             height=1,
             bits_per_tile=32,
             tile_id_mask=0x1FFFFFFF,
-            x_flip_mask=0x20000000,
+            x_flip_mask=0x80000000,
             y_flip_mask=0x40000000,
-            d_flip_mask=0x80000000,
+            d_flip_mask=0x20000000,
             tiles=tiles,
         ),
     )

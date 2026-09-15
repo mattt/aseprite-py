@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     layer = sprite.add_layer("map", kind=LayerType.TILEMAP, tileset_index=tileset.id)
 
     # Each cell is a little-endian 32-bit tile ID plus optional flip flags.
-    x_flip, y_flip, d_flip = 0x20000000, 0x40000000, 0x80000000
+    x_flip, y_flip, d_flip = 0x80000000, 0x40000000, 0x20000000
     cells = (
         2,
         2 | x_flip,

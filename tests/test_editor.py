@@ -189,6 +189,32 @@ def test_rectangular_tile_flips_match_cli(
 
 
 @needs_cli
+@pytest.mark.parametrize("swapped_masks", [False, True])
+@pytest.mark.parametrize("flips", range(8))
+def test_declared_tile_flip_masks_match_cli(
+    tmp_path: Path, swapped_masks: bool, flips: int
+) -> None:
+    sprite = single_tile_sprite()
+    tilemap = sprite.frames[0].cels[0].tilemap
+    assert tilemap is not None
+    if swapped_masks:
+        # Earlier examples swapped X and diagonal masks. These remain valid.
+        tilemap.x_flip_mask, tilemap.d_flip_mask = (
+            tilemap.d_flip_mask,
+            tilemap.x_flip_mask,
+        )
+    value = 1
+    if flips & 4:
+        value |= tilemap.x_flip_mask
+    if flips & 2:
+        value |= tilemap.y_flip_mask
+    if flips & 1:
+        value |= tilemap.d_flip_mask
+    tilemap.tiles = value.to_bytes(4, "little")
+    _assert_flatten_matches_cli(sprite, tmp_path)
+
+
+@needs_cli
 def test_background_layer_opacity_matches_cli(tmp_path: Path) -> None:
     sprite = Sprite(1, 1)
     sprite.layers[0].background = True

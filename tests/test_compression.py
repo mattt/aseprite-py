@@ -19,7 +19,7 @@ def _compressed_document(kind: str, compressed: bytes) -> bytes:
     header = struct.pack("<HhhBHh5xHH", 0, 0, 0, 255, cel_type, 0, 1, 1)
     if kind == "tilemap":
         header += struct.pack(
-            "<H4I10x", 32, 0x1FFFFFFF, 0x20000000, 0x40000000, 0x80000000
+            "<H4I10x", 32, 0x1FFFFFFF, 0x80000000, 0x40000000, 0x20000000
         )
     return _document(_chunk(CHUNK_CEL, header + compressed))
 

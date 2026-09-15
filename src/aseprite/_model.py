@@ -484,11 +484,16 @@ class CelExtra:
 class Tilemap:
     """Compressed-tilemap cel payload.
 
-    Aseprite 1.3 reads only tilemaps with 32 bits per tile. Other widths
-    are valid in the file format but the editor drops those cels, so use
-    32 when creating files for the editor. Tile IDs are extracted from
-    ``tile_id_mask`` and shifted down to bit zero. Diagonal flips remain
-    within the original tile dimensions; out-of-bounds samples are empty.
+    Aseprite 1.3 reads only tilemaps with 32 bits per tile.
+    Other widths are valid in the file format but the editor drops those cels,
+    so use 32 when creating files for the editor.
+    Aseprite writes ``tile_id_mask=0x1FFFFFFF``, ``x_flip_mask=0x80000000``,
+    ``y_flip_mask=0x40000000``, and ``d_flip_mask=0x20000000``.
+    Both Aseprite and this library read the masks declared in each cel;
+    this library preserves them when saving.
+    Tile IDs are extracted from ``tile_id_mask`` and shifted down to bit zero.
+    Diagonal flips remain within the original tile dimensions;
+    out-of-bounds samples are empty.
     """
 
     width: int

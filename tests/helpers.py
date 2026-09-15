@@ -103,23 +103,24 @@ def tilemap_sprite(
     flags = TILESET_FLAG_EMBEDDED
     if empty_is_zero:
         flags |= TILESET_FLAG_EMPTY_IS_ZERO
+    # Aseprite writes 32-bit tiles; narrower test tiles use the same bit order.
     if bits_per_tile == 32:
         tile_id_mask = 0x1FFFFFFF
-        x_flip_mask = 0x20000000
+        x_flip_mask = 0x80000000
         y_flip_mask = 0x40000000
-        d_flip_mask = 0x80000000
+        d_flip_mask = 0x20000000
         stride = 4
     elif bits_per_tile == 16:
         tile_id_mask = 0x1FFF
-        x_flip_mask = 0x2000
+        x_flip_mask = 0x8000
         y_flip_mask = 0x4000
-        d_flip_mask = 0x8000
+        d_flip_mask = 0x2000
         stride = 2
     else:
         tile_id_mask = 0x1F
-        x_flip_mask = 0x20
+        x_flip_mask = 0x80
         y_flip_mask = 0x40
-        d_flip_mask = 0x80
+        d_flip_mask = 0x20
         stride = 1
     value = tile_id & tile_id_mask
     if x_flip:
@@ -181,9 +182,9 @@ def single_tile_sprite(
             1,
             bits_per_tile,
             id_mask,
-            1 << flip_shift,
-            2 << flip_shift,
             4 << flip_shift,
+            2 << flip_shift,
+            1 << flip_shift,
             (1 << shift).to_bytes(bits_per_tile // 8, "little"),
         ),
     )
@@ -243,9 +244,9 @@ def rectangular_tile_sprite(
             1,
             32,
             0x1FFFFFFF,
-            0x20000000,
-            0x40000000,
             0x80000000,
+            0x40000000,
+            0x20000000,
             (1 | (flips << 29)).to_bytes(4, "little"),
         ),
     )
