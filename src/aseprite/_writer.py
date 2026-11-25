@@ -251,13 +251,13 @@ def _write_palette(w: Writer, palette: Palette) -> None:
     w.u32(len(colors) - 1 if colors else 0)
     w.pad(8)
     for color in colors:
-        flags = 1 if color.name else 0
+        flags = 1 if color.name is not None else 0
         w.u16(flags)
         w.u8(color.r)
         w.u8(color.g)
         w.u8(color.b)
         w.u8(color.a)
-        if color.name:
+        if color.name is not None:
             w.string(color.name)
 
 
