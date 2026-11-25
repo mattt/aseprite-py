@@ -90,6 +90,15 @@ def test_grayscale_and_indexed() -> None:
     assert loaded.palette[1].a == 200
 
 
+def test_palette_entry_names_roundtrip() -> None:
+    sprite = Sprite(1, 1, ColorMode.INDEXED)
+    sprite.palette.extend(
+        [Color(1, 2, 3), Color(4, 5, 6, name=""), Color(7, 8, 9, name="ink")]
+    )
+    loaded = Sprite.from_bytes(sprite.to_bytes())
+    assert loaded.palette == sprite.palette
+
+
 def test_cel_extra() -> None:
     sprite = rgba_sprite()
     cel = sprite.frames[0].cel(0)
