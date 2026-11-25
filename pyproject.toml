@@ -1,6 +1,6 @@
 [project]
 name = "aseprite"
-version = "0.1.0"
+version = "0.1.1"
 description = "Read and write Aseprite .ase/.aseprite files"
 readme = "README.md"
 authors = [
